@@ -11,7 +11,7 @@ from torch.nn.utils.rnn import pad_sequence
 from dataset import AsrDataset
 from model import LSTM_ASR
 import numpy as np
-
+from sklearn.model_selection import train_test_split
 def get_dimensions(lst):
     if isinstance(lst, list):
         return [len(lst)] + get_dimensions(lst[0]) if lst else []
@@ -27,30 +27,32 @@ def collate_fn(batch):
                            list_of_unpadded_feature_length (for CTCLoss)
     """
     features, word_spellings = zip(*batch)
-    input_lengths = torch.tensor([len(features[i])for i in range(len(features))])
+    # input_lengths = torch.tensor([len(features[i])for i in range(len(features))])
     target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
     
     word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist])# [torch.tensor(w) for w in word_spellings]
 
-    features = [[np.eye(256)[np.array(one_feature)-1] for one_feature in feature]  for feature in features]
-    
-    features = [torch.tensor(f) for f in features]
-    
+    features = [[np.eye(256)[np.array(one_frame_feature)-1] for one_frame_feature in one_word_feature]  for one_word_feature in features]
+    padded_features = [np.pad(one_word_feature,((0,256-len(one_word_feature)),(0,0)),'constant',constant_values=0) for one_word_feature in features]
+    padded_features = torch.stack([torch.tensor(f) for f in padded_features]).double()
+    padded_features = padded_features.unsqueeze(1)
     # print(f'feature:{features[0].shape},feature length {len(features)}\n')
-    padded_features = pad_sequence(features, batch_first=False)
-    
-    # print(padded_features.shape)
-
-    return padded_features, word_spellings, input_lengths, target_lengths
+    # padded_features = pad_sequence(features, batch_first=False)
+    # if debug: print(f'target:{word_spellings}')
+    # if debug: print(f'input_lengths: {input_lengths}')
+    if debug: print(f'pad_feature shape:{padded_features.shape}')
+    return padded_features, word_spellings, target_lengths
 
 def train(train_dataloader, model, ctc_loss, optimizer,epoch):
     model.train()
-    for batch_idx, (data, target, input_lengths, target_lengths) in enumerate(train_dataloader):
-        data = data.double().to(device)
+    for batch_idx, (data, target, target_lengths) in enumerate(train_dataloader):
+        if debug: print(f'input x model shape: {data.shape}')
+        data = data.to(device)
         target = target.double().to(device)
         optimizer.zero_grad()
-        output = model(data).log_softmax(2)
-
+        output = model(data).transpose(0,1).log_softmax(2)
+        input_lengths = torch.tensor([output.size(0) for _ in range(output.size(1))])
+        if debug: print(input_lengths)
         #important：裁剪（？）
         # print(output.shape)
         # output = nn.utils.rnn.pack_padded_sequence(output,input_lengths,batch_first=True)
@@ -67,14 +69,14 @@ def train(train_dataloader, model, ctc_loss, optimizer,epoch):
             print(f'Epoch: {epoch+1},Batch: {batch_idx+1}/{len(train_dataloader)},loss:{loss.item()}')
 
         optimizer.step()
-    
+
 def decode(output):
     #贪婪解码
     # print(f'original output shape: {output}')
     # output = output.transpose(0,1)
-    print(output)
+    if test_debug: print(f'model output.shape:{output.shape}')
     output = torch.argmax(output,dim=-1)
-    print(output)
+    if test_debug: print(f'output:{output}')
     # print(f'output shape: {output[3]}')
     decoded_output=[]
     blank_label= 0
@@ -93,7 +95,7 @@ def compute_accuracy(dataloader, model, decode):
     correct = 0
     total = 0
     with torch.no_grad():
-        for batch_idx,(data,target, input_lengths,output_lengths) in enumerate(dataloader):
+        for batch_idx,(data,target,output_lengths) in enumerate(dataloader):
             data = data.to(device)
             
             output = model(data)
@@ -111,17 +113,22 @@ def compute_accuracy(dataloader, model, decode):
 
 def main(use_trained):
     #########
-    global device
+    global device,debug,test_debug
+    debug = True
+    test_debug = True
     device = torch.device("cuda:0")
     
     training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
+    train_dataset, val_dataset = train_test_split(training_set,test_size=0.2)
+
     test_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
    
-    train_dataloader = DataLoader(training_set,batch_size=10,shuffle=True,collate_fn=collate_fn)
-    test_dataloader = DataLoader(test_set,batch_size=1,shuffle=False,collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_set,batch_size=5,shuffle=True,collate_fn=collate_fn)
+    val_dataloader = DataLoader(val_dataset, batch_size=5,shuffle=False,collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_set,batch_size=5,shuffle=True,collate_fn=collate_fn)
 
 
-    model = LSTM_ASR(input_size=256,output_size=26)
+    model = LSTM_ASR(input_size=[256,256],output_size=[16,26])
     
     # your can simply import ctc_loss from torch.nn
     loss_function = nn.CTCLoss()
@@ -133,17 +140,21 @@ def main(use_trained):
     model_path = 'checkpoint/model.pth'
     num_epochs = 50
     if(use_trained):
+        model = model.double().to(device)
         if os.path.exists(model_path):
             model.load_state_dict(torch.load(model_path))
-            model.train()
-    model = model.double().to(device)
-    for epoch in range(num_epochs):
-        train(train_dataloader, model, loss_function, optimizer,epoch)
-        torch.save(model.state_dict(),model_path)
+            model.eval()
+    else:
+        model = model.double().to(device)
+        for epoch in range(num_epochs):
+           
+            train(train_dataloader, model, loss_function, optimizer,epoch)
+            torch.save(model.state_dict(),model_path)
 
-    for batch_idx,(data,target,input_lengths,target_lengths) in enumerate(test_dataloader):
+    for batch_idx,(data,target,target_lengths) in enumerate(test_dataloader):
+        if debug: print(f'data: {data[2][0][5]}')
         data = data.to(device)
-        output = model(data)
+        output = model(data).log_softmax(2)
         decoded_output = decode(output)
 
     accuracy = compute_accuracy(test_dataloader,model,decode)
@@ -151,7 +162,7 @@ def main(use_trained):
 
 
 if __name__ == "__main__":
-    main(use_trained=False)
+    main(use_trained=True)
     # else:
     #     model.load_state_dict(torch.load('checkpoint/model.pth'))
     #     model.eval()

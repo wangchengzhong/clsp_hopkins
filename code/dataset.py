@@ -41,6 +41,10 @@ class AsrDataset(Dataset):
         # index_to_code = {i:code for i,code in enumerate(codes)}
 
         self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
+        self.max_feature_length = np.max([len(a) for a in self.features])
+        self.max_scipt_length = np.max([len(a) for a in self.script])
+
+
         # print(self.features[0][0])
     def __len__(self):
         """
@@ -85,4 +89,4 @@ class AsrDataset(Dataset):
         return features
 ###########################test module###############################
 # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
-# print(training_set.__getitem__(0)[0][0])
+# print(training_set.max_feature_length)
