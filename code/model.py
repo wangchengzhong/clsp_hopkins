@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 global debug
-debug = True
+debug = False
 class LSTM_ASR(torch.nn.Module):
     def __init__(self, input_size=[256,256], hidden_size=26, num_layers=3,
                  output_size=[16,26],feature_type="quantized"):
@@ -37,4 +37,3 @@ class LSTM_ASR(torch.nn.Module):
         x = self.fc(x)
         x = x.view(-1,16,26)
         return x
-

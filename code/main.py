@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import os
 import sys
 import string
@@ -114,8 +112,8 @@ def compute_accuracy(dataloader, model, decode):
 def main(use_trained):
     #########
     global device,debug,test_debug
-    debug = True
-    test_debug = True
+    debug = False
+    test_debug = False
     device = torch.device("cuda:0")
     
     training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
@@ -152,7 +150,7 @@ def main(use_trained):
             torch.save(model.state_dict(),model_path)
 
     for batch_idx,(data,target,target_lengths) in enumerate(test_dataloader):
-        if debug: print(f'data: {data[2][0][5]}')
+        if debug: print(f'data: {data.shape}')
         data = data.to(device)
         output = model(data).log_softmax(2)
         decoded_output = decode(output)
@@ -162,7 +160,7 @@ def main(use_trained):
 
 
 if __name__ == "__main__":
-    main(use_trained=True)
+    main(use_trained=False)
     # else:
     #     model.load_state_dict(torch.load('checkpoint/model.pth'))
     #     model.eval()
