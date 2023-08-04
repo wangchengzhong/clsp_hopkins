@@ -27,22 +27,21 @@ def collate_fn(batch):
                            list_of_unpadded_feature_length (for CTCLoss)
     """
     features, word_spellings = zip(*batch)
-    # print(word_spellings)
+    input_lengths = torch.tensor([len(features[i])for i in range(len(features))])
     target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
-
-    #pad word_spellings
     
     word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist])# [torch.tensor(w) for w in word_spellings]
 
-    padded_word_spellings = word_spellings # pad_sequence(word_spellings, batch_first=False)
-    #pad features
+    features = [[np.eye(256)[np.array(one_feature)-1] for one_feature in feature]  for feature in features]
+    
     features = [torch.tensor(f) for f in features]
+    
     # print(f'feature:{features[0].shape},feature length {len(features)}\n')
     padded_features = pad_sequence(features, batch_first=False)
-    input_lengths = torch.tensor([len(f) for f in padded_features])
+    
     # print(padded_features.shape)
 
-    return padded_features, padded_word_spellings, input_lengths, target_lengths
+    return padded_features, word_spellings, input_lengths, target_lengths
 
 def train(train_dataloader, model, ctc_loss, optimizer,epoch):
     model.train()
@@ -50,15 +49,18 @@ def train(train_dataloader, model, ctc_loss, optimizer,epoch):
         data = data.double().to(device)
         target = target.double().to(device)
         optimizer.zero_grad()
-        output = model(data).log_softmax(-1)
+        output = model(data).log_softmax(2)
 
+        #important：裁剪（？）
+        # print(output.shape)
+        # output = nn.utils.rnn.pack_padded_sequence(output,input_lengths,batch_first=True)
 
-        input_lengths = torch.full(size=(len(output[0]),),fill_value=len(output),dtype=torch.long)
+        # input_lengths = torch.full(size=(len(output[0]),),fill_value=len(output),dtype=torch.long)
         # print(input_lengths)
         # target = target.view(-1, target.size(1)).transpose(0,1)
         # print(data[0][3])
         # print(f'input_dim:{len(output)}\n target:{target.shape}\n output:{output.shape}\n\n')
-        loss = ctc_loss(output,target,input_lengths,target_lengths)
+        loss = ctc_loss(output, target, input_lengths, target_lengths)
         # print(loss.item())
         loss.backward()
         if batch_idx % 20 == 0:
@@ -70,8 +72,9 @@ def decode(output):
     #贪婪解码
     # print(f'original output shape: {output}')
     # output = output.transpose(0,1)
+    print(output)
     output = torch.argmax(output,dim=-1)
-   
+    print(output)
     # print(f'output shape: {output[3]}')
     decoded_output=[]
     blank_label= 0
@@ -90,9 +93,13 @@ def compute_accuracy(dataloader, model, decode):
     correct = 0
     total = 0
     with torch.no_grad():
-        for batch_idx,(data,target,input_lengths, output_lengths) in enumerate(dataloader):
+        for batch_idx,(data,target, input_lengths,output_lengths) in enumerate(dataloader):
             data = data.to(device)
-            output = model(data).log_softmax(-1)
+            
+            output = model(data)
+            # print(output.shape)
+            output = output.log_softmax(2)
+            # print(output)
             decoded_output = decode(output)
             # print(decoded_output)
             for i in range(len(decoded_output)):
@@ -110,30 +117,30 @@ def main(use_trained):
     training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
     test_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
    
-    train_dataloader = DataLoader(training_set,batch_size=50,shuffle=True,collate_fn=collate_fn)
-    test_dataloader = DataLoader(test_set,batch_size=50,shuffle=False,collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_set,batch_size=10,shuffle=True,collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_set,batch_size=1,shuffle=False,collate_fn=collate_fn)
 
 
     model = LSTM_ASR(input_size=256,output_size=26)
-    model = model.double().to(device)
+    
     # your can simply import ctc_loss from torch.nn
-    loss_function = nn.CTCLoss(blank=0)
+    loss_function = nn.CTCLoss()
 
     # optimizer is provided
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    model_path = 'checkpoint/model.pth'
-    if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path))
-        model.eval()
+
     # Training
-    if(False):
-        num_epochs = 50
-        for epoch in range(num_epochs):
-            train(train_dataloader, model, loss_function, optimizer,epoch)
-            torch.save(model.state_dict(),model_path)
-    # else:
-    #     model.load_state_dict(torch.load('checkpoint/model.pth'))
-    #     model.eval()
+    model_path = 'checkpoint/model.pth'
+    num_epochs = 50
+    if(use_trained):
+        if os.path.exists(model_path):
+            model.load_state_dict(torch.load(model_path))
+            model.train()
+    model = model.double().to(device)
+    for epoch in range(num_epochs):
+        train(train_dataloader, model, loss_function, optimizer,epoch)
+        torch.save(model.state_dict(),model_path)
+
     for batch_idx,(data,target,input_lengths,target_lengths) in enumerate(test_dataloader):
         data = data.to(device)
         output = model(data)
@@ -144,4 +151,7 @@ def main(use_trained):
 
 
 if __name__ == "__main__":
-    main(use_trained=True)
+    main(use_trained=False)
+    # else:
+    #     model.load_state_dict(torch.load('checkpoint/model.pth'))
+    #     model.eval()

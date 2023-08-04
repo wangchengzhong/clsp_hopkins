@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn
 
 class LSTM_ASR(torch.nn.Module):
-    def __init__(self, input_size=256, hidden_size=512, num_layers=2,
-                 output_size=26,feature_type="quantized",batch_first = False):
+    def __init__(self, input_size=256, hidden_size=3, num_layers=3,
+                 output_size=26,feature_type="quantized"):
         super().__init__()
 
         assert feature_type in ['quantized', 'mfcc']
-        self.lstm = nn.LSTM(input_size,hidden_size,num_layers,batch_first = False)
+        self.lstm = nn.LSTM(input_size,hidden_size,num_layers)
 
         self.dropout = nn.Dropout(0.5)
         

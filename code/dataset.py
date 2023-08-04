@@ -31,6 +31,7 @@ class AsrDataset(Dataset):
         self.script = [[0]+ array + [0] for array in self.script]
 
         self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
+        
         self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
         
         code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
@@ -40,7 +41,7 @@ class AsrDataset(Dataset):
         # index_to_code = {i:code for i,code in enumerate(codes)}
 
         self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
-
+        # print(self.features[0][0])
     def __len__(self):
         """
         :return: num_of_samples
@@ -55,11 +56,8 @@ class AsrDataset(Dataset):
         """
         
         spelling_of_word = self.script[idx]# np.eye(26)[np.array(self.script[idx])-1]
-        feature = np.eye(256)[np.array(self.features[idx])-1]
+        feature = self.features[idx]# np.eye(256)[np.array(self.features[idx])-1]
 
-
-
-        
         # endpoint = self.endpoints[idx]
         return feature,spelling_of_word
 
@@ -87,4 +85,4 @@ class AsrDataset(Dataset):
         return features
 ###########################test module###############################
 # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
-# print(training_set.__getitem__(3))
+# print(training_set.__getitem__(0)[0][0])

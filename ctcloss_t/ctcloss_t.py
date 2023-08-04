@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import torch
-
+from torch.nn.utils.rnn import pad_sequence
 if __name__ == '__main__':
     T = 50  # 输入序列长度
     C = 20  # 分类总数量，包括blank
@@ -27,4 +27,11 @@ if __name__ == '__main__':
     # 调用CTCLoss()对象计算损失值
     loss = ctc_loss(input, target, input_lengths, target_lengths)
 
-    print(loss)
+    # print(loss)
+
+    import torch
+
+    a = torch.ones(2, 2)
+    b = torch.ones(3, 2)
+    c = torch.ones(4, 2)
+    print(pad_sequence([a, b, c],batch_first=True))
