@@ -33,21 +33,23 @@ def collate_fn(batch):
     
     
     # new version when word_spelling is padded, still no use
-    # word_spellings = [sublist + [0]*(12-len(sublist)) for sublist in word_spellings]
-    # target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
+    target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
+    word_spellings = torch.tensor([sublist + [0]*(15-len(sublist)) for sublist in word_spellings])
+    
     # word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist])
     # if debug: print(f'word spellings shape after padding: {word_spellings.shape}')
     
     # old version when word_spellings is flattened
-    target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
-    word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist])# [torch.tensor(w) for w in word_spellings]
+    # target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
+    # word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist])# [torch.tensor(w) for w in word_spellings]
     
     # old_version when input feature is one-hot 
     # features = [[np.eye(256)[np.array(one_frame_feature)-1] for one_frame_feature in one_word_feature]  for one_word_feature in features]
-    padded_features = [np.pad(one_word_feature,((0,256-len(one_word_feature)),(0,0)),'constant',constant_values=0) for one_word_feature in features]
+    input_lengths = torch.tensor([len(feature) for feature in features])
+    padded_features = [np.pad(one_word_feature,((0,190-len(one_word_feature)),(0,0)),'constant',constant_values=0) for one_word_feature in features]
     padded_features = torch.stack([torch.tensor(f) for f in padded_features]).double()
 
-    padded_features = padded_features.unsqueeze(1)
+    # padded_features = padded_features.unsqueeze(1)
 
 
     # old version when pad_squence
@@ -55,27 +57,24 @@ def collate_fn(batch):
     # if debug: print(f'target:{word_spellings}')
     # if debug: print(f'input_lengths: {input_lengths}')
     if debug: print(f'pad_feature shape:{padded_features.shape}')
-    return padded_features, word_spellings, target_lengths
+    return padded_features, word_spellings, input_lengths, target_lengths
 
 def train(train_dataloader, model, ctc_loss, optimizer,epoch):
     model.train()
-    for batch_idx, (data, target, target_lengths) in enumerate(train_dataloader):
+    for batch_idx, (data, target, input_lengths, target_lengths) in enumerate(train_dataloader):
         if debug: print(f'input x model shape: {data.shape}')
         data = data.to(device)
         target = target.double().to(device)
         optimizer.zero_grad()
-        output = model(data).transpose(0,1).log_softmax(2) # implemented in model.py .transpose(0,1).log_softmax(2)
+        output = model(data).transpose(0,1)# .log_softmax(2) # implemented in model.py .transpose(0,1).log_softmax(2)
         if debug: print(f'model output shape: {output.shape}')
-        input_lengths = torch.tensor([output.size(0) for _ in range(output.size(1))])
+        # input_lengths = torch.tensor([output.size(0) for _ in range(output.size(1))])
         if debug: print(f'ctcloss input lengths: {input_lengths} target lengths: {target_lengths}')
         #important：裁剪（？）
         # print(output.shape)
         # output = nn.utils.rnn.pack_padded_sequence(output,input_lengths,batch_first=True)
 
-        # input_lengths = torch.full(size=(len(output[0]),),fill_value=len(output),dtype=torch.long)
-        # print(input_lengths)
         # target = target.view(-1, target.size(1)).transpose(0,1)
-        # print(data[0][3])
         # print(f'input_dim:{len(output)}\n target:{target.shape}\n output:{output.shape}\n\n')
         loss = ctc_loss(output, target, input_lengths, target_lengths)
         # print(loss.item())
@@ -91,16 +90,16 @@ def main(use_trained):
     
     training_set = AsrDataset('split/clsp.trnscr.kept','split/clsp.trnlbls.kept','data/clsp.lblnames')
     train_dataset, val_dataset = train_test_split(training_set,test_size=0.2)
-
+    training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
     test_set = AsrDataset('split/clsp.trnscr.held','split/clsp.trnlbls.held','data/clsp.lblnames')
 
-    train_dataloader = DataLoader(training_set,batch_size=50,shuffle=True,collate_fn=collate_fn)
-    val_dataloader = DataLoader(test_set, batch_size=50,shuffle=True,collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_set,batch_size=624,shuffle=True,collate_fn=collate_fn)
+    val_dataloader = DataLoader(test_set, batch_size=624,shuffle=True,collate_fn=collate_fn)
     
     test_dataloader = DataLoader(test_set,batch_size=1,shuffle=True,collate_fn=collate_fn)
 
 
-    model = LSTM_ASR(input_size=[256,256],output_size=[50,43])
+    model = LSTM_ASR(input_size=[190,256],output_size=[190,43])
     
     # your can simply import ctc_loss from torch.nn
     loss_function = nn.CTCLoss(blank=0)
@@ -111,7 +110,7 @@ def main(use_trained):
     # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4,momentum=0.9)
     # Training
     model_path = 'checkpoint/model.pth'
-    num_epochs = 200
+    num_epochs = 2000
     if(use_trained):
         model = model.double().to(device)
         if os.path.exists(model_path):
@@ -126,10 +125,10 @@ def main(use_trained):
             scheduler.step(val_loss)
             torch.save(model.state_dict(),model_path)
 
-    for batch_idx,(data,target,target_lengths) in enumerate(test_dataloader):
+    for batch_idx,(data, target, input_lengths, target_lengths) in enumerate(test_dataloader):
         if debug: print(f'data: {data.shape}')
         data = data.to(device)
-        output = model(data).log_softmax(2)
+        output = model(data)# .log_softmax(2)
         decoded_output = decode(output)
 
     accuracy = compute_accuracy(test_dataloader,model,decode)
@@ -139,11 +138,11 @@ def compute_val_loss(dataloader, model, loss_function):
     model.eval()
     total_loss = 0
     with torch.no_grad():
-        for batch_idx,(data, target, target_lengths) in enumerate(dataloader):
+        for batch_idx,(data, target, input_lengths, target_lengths) in enumerate(dataloader):
             data = data.to(device)
             target = target.double().to(device)
-            output = model(data).transpose(0,1).log_softmax(2)
-            input_lengths = torch.tensor([output.size(0) for _ in range(output.size(1))])
+            output = model(data).transpose(0,1)# .log_softmax(2)
+            #  input_lengths = torch.tensor([output.size(0) for _ in range(output.size(1))])
             loss = loss_function(output,target,input_lengths,target_lengths)
             total_loss += loss.item()
     return total_loss / len(dataloader)
@@ -178,7 +177,7 @@ def compute_accuracy(dataloader, model, decode):
             
             output = model(data)
             # print(output.shape)
-            output = output.log_softmax(2)
+            output = output# .log_softmax(2)
             # print(output)
             decoded_output = decode(output)
             # print(decoded_output)

@@ -36,7 +36,7 @@ class AsrDataset(Dataset):
         phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
         self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
         self.script = [[0]+array+[0] for array in self.script] # max length (including 0): 10
-        
+
         # old version when script is not phoneme but word itself
         # self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
         # self.script = [[0]+ array + [0] for array in self.script]
