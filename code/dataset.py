@@ -5,7 +5,7 @@ import os
 import pandas as pd
 from torch.utils.data import Dataset
 import numpy as np
-
+from gensim.models import Word2Vec
 class AsrDataset(Dataset):
     def __init__(self, scr_file, feature_file=None,
                  feature_label_file=None,
@@ -31,21 +31,26 @@ class AsrDataset(Dataset):
         self.script = [[0]+ array + [0] for array in self.script]
 
         self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
-        
-        self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
-        
-        code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
+        self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
+        # print(self.features)
+        self.model = Word2Vec(self.features,vector_size=256,min_count=1,workers=20)
+        # print(f"model testing: {self.model.wv['GQ']}")
+        # new version comment
+        # self.features = [model.wv[word] for word in model.wv.key_to_index]
 
-        tmp = np.array(pd.read_csv('data/clsp.endpts',header=None).values.tolist()[1:]).flatten().tolist()
-        self.endpoints = [[int(start),int(end)] for start_end_str in tmp for start,end in [start_end_str.split(' ')] ]
+        self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
+
+        # old version when features is one_hot
+        # code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
+
+        # tmp = np.array(pd.read_csv('data/clsp.endpts',header=None).values.tolist()[1:]).flatten().tolist()
+        # self.endpoints = [[int(start),int(end)] for start_end_str in tmp for start,end in [start_end_str.split(' ')] ]
         # index_to_code = {i:code for i,code in enumerate(codes)}
 
-        self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
+        # self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
         self.max_feature_length = np.max([len(a) for a in self.features])
         self.max_scipt_length = np.max([len(a) for a in self.script])
 
-
-        # print(self.features[0][0])
     def __len__(self):
         """
         :return: num_of_samples
@@ -59,11 +64,12 @@ class AsrDataset(Dataset):
         :return: spelling_of_word, feature
         """
         
-        spelling_of_word = self.script[idx]# np.eye(26)[np.array(self.script[idx])-1]
-        feature = self.features[idx]# np.eye(256)[np.array(self.features[idx])-1]
-
+        spelling_of_word = self.script[idx]# older version in one-hot np.eye(26)[np.array(self.script[idx])-1]
+        # old version: feature = self.features[idx] # older version in one-hot np.eye(256)[np.array(self.features[idx])-1]
+        feature = [self.model.wv[a] for a in self.features[idx]]
+        # print(np.array(feature).shape)
         # endpoint = self.endpoints[idx]
-        return feature,spelling_of_word
+        return feature, spelling_of_word
 
     def char_to_int(self,char):
         return string.ascii_lowercase.index(char.lower())+1

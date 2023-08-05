@@ -6,16 +6,16 @@ global debug
 debug = False
 class LSTM_ASR(torch.nn.Module):
     def __init__(self, input_size=[256,256], hidden_size=26, num_layers=3,
-                 output_size=[16,26],feature_type="quantized"):
+                 output_size=[30,26],feature_type="quantized"):
         super().__init__()
-
+        self.output_size = output_size
         assert feature_type in ['quantized', 'mfcc']
 
         self.conv1 = nn.Conv2d(1,8,kernel_size=5,stride=3)
         self.conv2 = nn.Conv2d(8,1,kernel_size=5,stride=3)
 
         self.lstm = nn.LSTM(input_size=27,hidden_size=26,num_layers=2,batch_first=False)
-        self.fc = nn.Linear(in_features = 27*26,out_features = 16*26)
+        self.fc = nn.Linear(in_features = 27*26,out_features = output_size[0]*26)
 
 
     def forward(self, batch_features):
@@ -35,5 +35,5 @@ class LSTM_ASR(torch.nn.Module):
         x = x.reshape(x.size(0),-1)
         # print(x.shape)
         x = self.fc(x)
-        x = x.view(-1,16,26)
+        x = x.view(-1,self.output_size[0],26)
         return x
