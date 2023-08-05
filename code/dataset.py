@@ -6,6 +6,8 @@ import pandas as pd
 from torch.utils.data import Dataset
 import numpy as np
 from gensim.models import Word2Vec
+from g2p_en import G2p
+from collections import Counter
 class AsrDataset(Dataset):
     def __init__(self, scr_file, feature_file=None,
                  feature_label_file=None,
@@ -18,6 +20,7 @@ class AsrDataset(Dataset):
         :param wav_scp: clsp.trnwav or clsp.devwav
         :param wav_dir: wavforms/
         """
+        g2p = G2p()
         self.feature_type = feature_type
         assert self.feature_type in ['quantized', 'mfcc']
 
@@ -26,9 +29,17 @@ class AsrDataset(Dataset):
 
         # load data
         self.script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
-
-        self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
-        self.script = [[0]+ array + [0] for array in self.script]
+        # new version when using g2p to convert script to phonemes
+        self.script = [g2p(word) for word in self.script]
+        self.phonemes = list(set([phoneme for sublist in self.script for phoneme in sublist]))
+        # self.phonemes_counts = Counter([phoneme for sublist in self.script for phoneme in sublist])
+        phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
+        self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
+        self.script = [[0]+array+[0] for array in self.script] # max length (including 0): 10
+        
+        # old version when script is not phoneme but word itself
+        # self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
+        # self.script = [[0]+ array + [0] for array in self.script]
 
         self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
         self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
@@ -94,5 +105,5 @@ class AsrDataset(Dataset):
                 features.append(feats)
         return features
 ###########################test module###############################
-# training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
+training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
 # print(training_set.max_feature_length)
