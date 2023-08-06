@@ -35,7 +35,7 @@ class AsrDataset(Dataset):
         # self.phonemes_counts = Counter([phoneme for sublist in self.script for phoneme in sublist])
         phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
         self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
-        self.script = [[0]+array+[0] for array in self.script] # max length (including 0): 10
+        self.script = [[0] + array + [0] for array in self.script] # max length (including 0): 10
 
         # old version when script is not phoneme but word itself
         # self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
@@ -78,8 +78,7 @@ class AsrDataset(Dataset):
         spelling_of_word = self.script[idx]# older version in one-hot np.eye(26)[np.array(self.script[idx])-1]
         # old version: feature = self.features[idx] # older version in one-hot np.eye(256)[np.array(self.features[idx])-1]
         feature = [self.model.wv[a] for a in self.features[idx]]
-        # print(np.array(feature).shape)
-        # endpoint = self.endpoints[idx]
+
         return feature, spelling_of_word
 
     def char_to_int(self,char):
@@ -105,5 +104,5 @@ class AsrDataset(Dataset):
                 features.append(feats)
         return features
 ###########################test module###############################
-training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
-# print(training_set.max_feature_length)
+# training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
+# print(training_set.script)
