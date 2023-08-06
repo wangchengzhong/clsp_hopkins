@@ -5,19 +5,19 @@ import numpy as np
 global debug
 debug = False
 class LSTM_ASR(torch.nn.Module):
-    def __init__(self, input_size=[256,256], hidden_size=3, num_layers=1,
-                 output_size=[256,43],feature_type="quantized"):
+    def __init__(self, input_size=[190,256], hidden_size=3, num_layers=1,
+                 output_size=[190,26],feature_type="quantized"):
         super().__init__()
 
         self.output_size = output_size
         assert feature_type in ['quantized', 'mfcc']
 
-        self.conv1 = nn.Conv2d(1,1,kernel_size=3,stride=2)
-        # self.conv2 = nn.Conv2d(1,1,kernel_size=3,stride=2)
+        # self.conv1 = nn.Conv2d(1, 1, kernel_size=3,stride=2)
+        # self.conv2 = nn.Conv2d(1, 1, kernel_size=3,stride=2)
         
         conv_out_seq_length = input_size[1]
-        self.lstm = nn.LSTM(input_size=conv_out_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True)
-        self.fc = nn.Linear(in_features = hidden_size, out_features = output_size[1])
+        self.lstm = nn.LSTM(input_size=conv_out_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True,bidirectional=True)
+        self.fc = nn.Linear(in_features = hidden_size * 2, out_features = output_size[1])
 
     def forward(self, batch_features, input_lengths):
         """

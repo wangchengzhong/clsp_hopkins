@@ -10,11 +10,11 @@ from dataset import AsrDataset
 from model import LSTM_ASR
 import numpy as np
 from sklearn.model_selection import train_test_split
-torch.backends.cudnn.deterministic = True 
+# torch.backends.cudnn.deterministic = True 
 global device,debug,test_debug,test_mode
 debug = False
 test_debug = True
-test_mode = False
+train_mode = False
 device = torch.device("cuda:0")
 def get_dimensions(lst):
     if isinstance(lst, list):
@@ -36,7 +36,6 @@ def collate_fn(batch):
     # new version when word_spelling is padded, still no use
     # target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
     # word_spellings = torch.tensor([sublist + [0]*(15-len(sublist)) for sublist in word_spellings])
-    
     # word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist])
     # if debug: print(f'word spellings shape after padding: {word_spellings.shape}')
     
@@ -44,9 +43,11 @@ def collate_fn(batch):
     target_lengths = torch.tensor([len(word_spellings[i]) for i in range(len(word_spellings))],dtype=torch.int32)
     word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist],dtype=torch.int32)# [torch.tensor(w) for w in word_spellings]
     
-    # old_version when input feature is one-hot 
-    # features = [[np.eye(256)[np.array(one_frame_feature)-1] for one_frame_feature in one_word_feature]  for one_word_feature in features]
     input_lengths = torch.tensor([len(feature) for feature in features])
+
+    # old_version when input feature is one-hot 
+    features = [[np.eye(256)[np.array(one_frame_feature)-1] for one_frame_feature in one_word_feature]  for one_word_feature in features]
+    
     padded_features = [np.pad(one_word_feature,((0,190-len(one_word_feature)),(0,0)),'constant',constant_values=0) for one_word_feature in features]
     padded_features = torch.stack([torch.tensor(f) for f in padded_features]).double()
 
@@ -58,7 +59,7 @@ def collate_fn(batch):
     # padded_features = pad_sequence(features, batch_first=False)
     # if debug: print(f'target:{word_spellings}')
     # if debug: print(f'input_lengths: {input_lengths}')
-    if debug: print(f'pad_feature shape:{padded_features.shape}')
+    if debug: print(f'pad_feature shape: {padded_features.shape}')
     return padded_features, word_spellings, input_lengths, target_lengths
 
 def train(train_dataloader, model, ctc_loss, optimizer,epoch):
@@ -68,16 +69,16 @@ def train(train_dataloader, model, ctc_loss, optimizer,epoch):
         data = data.to(device)
         target = target.to(device)
         optimizer.zero_grad()
-        output = model(data,input_lengths).transpose(0,1).log_softmax(-1).requires_grad_() # implemented in model.py .transpose(0,1).log_softmax(2)
+        output = model(data,input_lengths).transpose(0,1).log_softmax(-1).requires_grad_() 
         if debug: print(f'model output shape: {output.shape}')
         # input_lengths = torch.tensor([int(output.size(0))  for i in range(output.size(1))],dtype=torch.int32)
-        if debug: print(f'ctcloss input lengths: {input_lengths} target lengths: {target_lengths}')
+        if debug: print(f'ctcloss input lengths: {input_lengths}\nctcloss target lengths: {target_lengths}')
 
 
         loss = ctc_loss(output, target, input_lengths, target_lengths)
 
         loss.backward()
-        if batch_idx % 40 == 0:
+        if batch_idx % 100 == 0:
             print(f'Epoch: {epoch+1},Batch: {batch_idx+1}/{len(train_dataloader)},loss:{loss.item()}')
 
         optimizer.step()
@@ -94,27 +95,23 @@ def main(use_trained):
     train_dataloader = DataLoader(training_set,batch_size=5,shuffle=True,collate_fn=collate_fn)
     val_dataloader = DataLoader(test_set, batch_size=5,shuffle=True,collate_fn=collate_fn)
     
-    test_dataloader = DataLoader(test_set,batch_size=1,shuffle=True,collate_fn=collate_fn)
+    test_dataloader = DataLoader(training_set,batch_size=1,shuffle=True,collate_fn=collate_fn)
 
 
-    model = LSTM_ASR(input_size=[190,256],output_size=[190,43])
+    model = LSTM_ASR(input_size=[190,256],output_size=[190,27])
     
     # your can simply import ctc_loss from torch.nn
     loss_function = nn.CTCLoss()
 
     # optimizer is provided
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience=5,factor=0.5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
     # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4,momentum=0.9)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience=5,factor=0.5)
+    
     # Training
     model_path = 'checkpoint/model.pth'
-    num_epochs = 20
+    num_epochs = 37
     if(use_trained):
-        model = model.double().to(device)
-        if os.path.exists(model_path):
-            model.load_state_dict(torch.load(model_path))
-            model.eval()
-    else:
         model = model.double().to(device)
         for epoch in range(num_epochs):
            
@@ -122,16 +119,22 @@ def main(use_trained):
             val_loss = compute_val_loss(val_dataloader, model, loss_function)
             scheduler.step(val_loss)
             torch.save(model.state_dict(),model_path)
+            if debug: print('\n\n\n')
+    else:
+        model = model.double().to(device)
+        if os.path.exists(model_path):
+            model.load_state_dict(torch.load(model_path))
+            model.eval()
+        for batch_idx,(data, target, input_lengths, target_lengths) in enumerate(test_dataloader):
+            if debug: print(f'data: {data.shape}')
+            data = data.to(device)
+            output = model(data,input_lengths).log_softmax(-1)
+            if test_debug: print(f'model output shape: {output.shape}')
+            decoded_output = decode(output)
 
-    for batch_idx,(data, target, input_lengths, target_lengths) in enumerate(test_dataloader):
-        if debug: print(f'data: {data.shape}')
-        data = data.to(device)
-        output = model(data,input_lengths).log_softmax(-1)
-        if test_debug: print(f'model output shape: {output.shape}')
-        decoded_output = decode(output)
+        accuracy = compute_accuracy(test_dataloader,model,decode)
+        print('Test Accuracy: {:.2f}%'.format(accuracy * 100))
 
-    accuracy = compute_accuracy(test_dataloader,model,decode)
-    print('Test Accuracy: {:.2f}%'.format(accuracy * 100))
 
 def compute_val_loss(dataloader, model, loss_function):
     model.eval()
@@ -189,4 +192,4 @@ def compute_accuracy(dataloader, model, decode):
     return correct/total
 
 if __name__ == "__main__":
-    main(use_trained=test_mode)
+    main(use_trained=train_mode)

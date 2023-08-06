@@ -8,10 +8,11 @@ import numpy as np
 from gensim.models import Word2Vec
 from g2p_en import G2p
 from collections import Counter
+import soundfile as sf
 class AsrDataset(Dataset):
     def __init__(self, scr_file, feature_file=None,
                  feature_label_file=None,
-                 wav_scp=None, wav_dir=None,feature_type='quantized'):
+                 wav_scp='data/clsp.trnwav', wav_dir='data/waveforms',feature_type='quantized'):
         """
         :param scr_file: clsp.trnscr
         :param feature_type: "quantized" or "mfcc"
@@ -29,39 +30,39 @@ class AsrDataset(Dataset):
 
         # load data
         self.script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
-        # new version when using g2p to convert script to phonemes
-        self.script = [g2p(word) for word in self.script]
-        self.phonemes = list(set([phoneme for sublist in self.script for phoneme in sublist]))
-        # self.phonemes_counts = Counter([phoneme for sublist in self.script for phoneme in sublist])
-        phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
-        self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
-        self.script = [[0] + array + [0] for array in self.script] # max length (including 0): 10
+        # # new version when using g2p to convert script to phonemes
+        # self.script = [g2p(word) for word in self.script]
+        # self.phonemes = list(set([phoneme for sublist in self.script for phoneme in sublist]))
+        # # self.phonemes_counts = Counter([phoneme for sublist in self.script for phoneme in sublist])
+        # phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
+        # self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
+        # self.script = [[0] + array + [0] for array in self.script] # max length (including 0): 10
 
         # old version when script is not phoneme but word itself
-        # self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
-        # self.script = [[0]+ array + [0] for array in self.script]
+        self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
+        self.script = [[26] + array + [26] for array in self.script]
 
+        
         self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
-        self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
-        # print(self.features)
-        self.model = Word2Vec(self.features,vector_size=256,min_count=1,workers=20)
-        # print(f"model testing: {self.model.wv['GQ']}")
-        # new version comment
-        # self.features = [model.wv[word] for word in model.wv.key_to_index]
 
-        self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
+        # new version when features is converted by Word2Vec
+        # self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
+        # self.model = Word2Vec(self.features,vector_size=10,min_count=1,workers=5)
+        # # print(f"model testing: {self.model.wv['GQ']}")
 
         # old version when features is one_hot
-        # code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
+        self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
+        code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
 
-        # tmp = np.array(pd.read_csv('data/clsp.endpts',header=None).values.tolist()[1:]).flatten().tolist()
-        # self.endpoints = [[int(start),int(end)] for start_end_str in tmp for start,end in [start_end_str.split(' ')] ]
-        # index_to_code = {i:code for i,code in enumerate(codes)}
+        self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
 
-        # self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
+        # self.mfcc_features = self.compute_mfcc(wav_scp = wav_scp, wav_dir = wav_dir)
+        
         self.max_feature_length = np.max([len(a) for a in self.features])
         self.max_scipt_length = np.max([len(a) for a in self.script])
 
+        # tmp = np.array(pd.read_csv('data/clsp.endpts',header=None).values.tolist()[1:]).flatten().tolist()
+        # self.endpoints = [[int(start),int(end)] for start_end_str in tmp for start,end in [start_end_str.split(' ')] ]
     def __len__(self):
         """
         :return: num_of_samples
@@ -76,8 +77,10 @@ class AsrDataset(Dataset):
         """
         
         spelling_of_word = self.script[idx]# older version in one-hot np.eye(26)[np.array(self.script[idx])-1]
-        # old version: feature = self.features[idx] # older version in one-hot np.eye(256)[np.array(self.features[idx])-1]
-        feature = [self.model.wv[a] for a in self.features[idx]]
+        # old version when feature is one-hot
+        feature = self.features[idx] # older version in one-hot np.eye(256)[np.array(self.features[idx])-1]
+        # new version when feature is processed by Word2Vec
+        # feature = [self.model.wv[a] for a in self.features[idx]]
 
         return feature, spelling_of_word
 
@@ -99,10 +102,12 @@ class AsrDataset(Dataset):
                 wavfile = wavfile.strip()
                 if wavfile == 'jhucsp.trnwav':  # skip header
                     continue
-                wav, sr = librosa.load(os.path.join(wav_dir, wavfile), sr=None)
+                wavfile_path = os.path.join(wav_dir, wavfile)
+                # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
+                wav, sr = sf.read(os.path.join(wav_dir, wavfile),dtype='float32')
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()
                 features.append(feats)
         return features
 ###########################test module###############################
-# training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
-# print(training_set.script)
+# training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames')
+# print(len(training_set.__getitem__(6)[0][79]))
