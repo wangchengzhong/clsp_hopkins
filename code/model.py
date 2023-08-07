@@ -2,11 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import torch.nn.init as init
 global debug
 debug = False
 class LSTM_ASR(torch.nn.Module):
-    def __init__(self, input_size=[190,256], hidden_size=10, num_layers=2,
-                 output_size=[94,26],feature_type="quantized"):
+    def __init__(self, input_size=[182,256], hidden_size=17, num_layers=3,
+                 output_size=[62,26],feature_type="quantized"):
         super().__init__()
 
         self.output_size = output_size
@@ -19,6 +20,15 @@ class LSTM_ASR(torch.nn.Module):
         self.lstm = nn.LSTM(input_size=self.conv_out_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True,bidirectional=True)
         self.fc = nn.Linear(in_features = hidden_size * 2, out_features = output_size[1])
 
+        # for m in self.modules():
+        #     if isinstance(m,nn.Conv2d):
+        #         init.kaiming_normal_(m.weight)
+        #         if m.bisa is not None:
+        #             init.constant_(m.bias,0)
+        #     elif isinstance(m, nn.BatchNorm2d):
+        #         init.constant_(m.weight,1)
+        #         init.constant_(m.bias,0)
+
     def forward(self, batch_features, input_lengths):
         """
         :param batch_features: batched acoustic features
@@ -27,7 +37,7 @@ class LSTM_ASR(torch.nn.Module):
         # old version when using conv
         x = self.conv1(batch_features)
         x = self.bn1(x)
-        x = F.sigmoid(x)
+        x = F.relu(x)
 
         # if debug: print(f'after 1 conv x shape: {x.shape}')
         # x = F.relu(self.conv2(x))
@@ -42,7 +52,7 @@ class LSTM_ASR(torch.nn.Module):
         x,_ = nn.utils.rnn.pad_packed_sequence(x,batch_first=True,padding_value=0)
         current_length = x.size(1)
         if current_length < self.output_size[0]:
-            padding = torch.zeros((x.size(0),self.output_size[0]-current_length,x.size(2))).to(x.device)
+            padding = torch.zeros((x.size(0),self.output_size[0] - current_length,x.size(2))).to(x.device)
             x = torch.cat([x,padding],dim=1)
         # new version when directly output lstm
         # x = x.log_softmax(-1)
@@ -53,11 +63,12 @@ class LSTM_ASR(torch.nn.Module):
         # old version when linear layer is processed throughout all sequence_len*feautre_len
         # x = x.reshape(x.size(0),-1)
         # new version when linear layer is only processed through feature_len
-        x = x.reshape(x.shape[0] * x.shape[1],-1)
+        x = x.view(x.shape[0] * x.shape[1],-1)
 
         if debug: print(f'x before fc shape:{x.shape}')
         
         x = self.fc(x)
-        x = x.reshape(-1,self.output_size[0],self.output_size[1])
+        x = x.view(-1,self.output_size[0],self.output_size[1])
         if debug: print(f'model output shape: {x.shape}')
+        x = F.log_softmax(x,dim=-1)
         return x
