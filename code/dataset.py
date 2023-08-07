@@ -40,23 +40,25 @@ class AsrDataset(Dataset):
 
         # old version when script is not phoneme but word itself
         self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
-        self.script = [[26] + array + [26] for array in self.script]
+        # old version when only using 0 at start and end of array
+        # self.script = [[0] + array + [0] for array in self.script]
+        # new version when add 0 at each interval
+        self.script = [[0] + [item for sublist in [[i,0] for i in array] for item in sublist] for array in self.script]
 
         
         self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
 
         # new version when features is converted by Word2Vec
         # self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
-        # self.model = Word2Vec(self.features,vector_size=10,min_count=1,workers=5)
+        # self.model = Word2Vec(self.features,vector_size=256,min_count=1,workers=5)
         # # print(f"model testing: {self.model.wv['GQ']}")
 
         # old version when features is one_hot
         self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
         code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
-
         self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
 
-        # self.mfcc_features = self.compute_mfcc(wav_scp = wav_scp, wav_dir = wav_dir)
+        self.mfcc_features = self.compute_mfcc(wav_scp = wav_scp, wav_dir = wav_dir)
         
         self.max_feature_length = np.max([len(a) for a in self.features])
         self.max_scipt_length = np.max([len(a) for a in self.script])
@@ -110,4 +112,4 @@ class AsrDataset(Dataset):
         return features
 ###########################test module###############################
 # training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames')
-# print(len(training_set.__getitem__(6)[0][79]))
+# print(training_set.mfcc_features)

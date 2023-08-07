@@ -11,10 +11,14 @@ from model import LSTM_ASR
 import numpy as np
 from sklearn.model_selection import train_test_split
 # torch.backends.cudnn.deterministic = True 
-global device,debug,test_debug,test_mode
+# hyper parameters
+global device,debug,test_debug,test_mode,gNumEpoch,gBatchSize,gLr
 debug = False
 test_debug = True
 train_mode = False
+gNumEpoch = 30
+gBatchSize = 5
+gLr = 5e-5
 device = torch.device("cuda:0")
 def get_dimensions(lst):
     if isinstance(lst, list):
@@ -43,7 +47,7 @@ def collate_fn(batch):
     target_lengths = torch.tensor([len(word_spellings[i]) for i in range(len(word_spellings))],dtype=torch.int32)
     word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist],dtype=torch.int32)# [torch.tensor(w) for w in word_spellings]
     
-    input_lengths = torch.tensor([len(feature) for feature in features])
+    input_lengths = torch.tensor([int(len(feature) * 62 / 190) for feature in features])
 
     # old_version when input feature is one-hot 
     features = [[np.eye(256)[np.array(one_frame_feature)-1] for one_frame_feature in one_word_feature]  for one_word_feature in features]
@@ -52,7 +56,7 @@ def collate_fn(batch):
     padded_features = torch.stack([torch.tensor(f) for f in padded_features]).double()
 
     # old version when using conv2d
-    # padded_features = padded_features.unsqueeze(1)
+    padded_features = padded_features.unsqueeze(1)
 
 
     # old version when pad_squence
@@ -92,25 +96,25 @@ def main(use_trained):
     # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
     test_set = AsrDataset('split/clsp.trnscr.held','split/clsp.trnlbls.held','data/clsp.lblnames')
 
-    train_dataloader = DataLoader(training_set,batch_size=5,shuffle=True,collate_fn=collate_fn)
-    val_dataloader = DataLoader(test_set, batch_size=5,shuffle=True,collate_fn=collate_fn)
+    train_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
+    val_dataloader = DataLoader(test_set, batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     
-    test_dataloader = DataLoader(training_set,batch_size=1,shuffle=True,collate_fn=collate_fn)
+    test_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
 
 
-    model = LSTM_ASR(input_size=[190,256],output_size=[190,27])
+    model = LSTM_ASR(input_size=[190,256],output_size=[62,26])
     
     # your can simply import ctc_loss from torch.nn
     loss_function = nn.CTCLoss()
 
     # optimizer is provided
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=gLr)
     # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4,momentum=0.9)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience=5,factor=0.5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience=5,factor=0.1)
     
     # Training
     model_path = 'checkpoint/model.pth'
-    num_epochs = 37
+    num_epochs = gNumEpoch
     if(use_trained):
         model = model.double().to(device)
         for epoch in range(num_epochs):
@@ -154,7 +158,12 @@ def decode(output):
     # print(f'original output shape: {output}')
     # output = output.transpose(0,1)
     if test_debug: print(f'model output.shape:{output.shape}')
+    # old version: find the largest
     output = torch.argmax(output,dim=-1)
+
+    # find the 2nd largest
+    # _, indices = torch.topk(output,2,dim=-1)
+    # output = indices[:,:,1]
     if test_debug: print(f'output:{output}')
     
     # print(f'output shape: {output[3]}')
