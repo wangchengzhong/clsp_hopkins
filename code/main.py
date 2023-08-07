@@ -15,12 +15,13 @@ from test_script.crnn.models.crnn import CRNN
 # hyper parameters
 global device,debug,test_debug,test_mode,gNumEpoch,gBatchSize,gLr
 debug = False
-test_debug = True
-train_mode = False
-gNumEpoch = 1000
-gBatchSize = 1#15
+test_debug = False
+train_mode = True
+gNumEpoch = 2000
+gBatchSize = 15
 gLr =  1e-4
 device = torch.device("cuda:0")
+use_pretrained = True
 def get_dimensions(lst):
     if isinstance(lst, list):
         return [len(lst)] + get_dimensions(lst[0]) if lst else []
@@ -103,7 +104,7 @@ def main(training):
     train_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     val_dataloader = DataLoader(test_set, batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     
-    test_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
 
 
     model = LSTM_ASR(input_size=[182,256],output_size=[60,43])
@@ -117,9 +118,14 @@ def main(training):
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience = 1000,factor=0.99999)
     
     # Training
-    model_path = f'checkpoint/model_batch_{gBatchSize}_lr_{gLr}.pth'
+    model_path = f'checkpoint/model_out_phoneme_batch_{gBatchSize+1000}_lr_{gLr}.pth'
+    pretrained_model_path = 'checkpoint/model_trial.pth'
     num_epochs = gNumEpoch
     if(training):
+        if use_pretrained:
+            model.load_state_dict(torch.load(pretrained_model_path))
+            model.train()
+            print('have load model')
         for epoch in range(num_epochs):
             train(train_dataloader, model, loss_function, optimizer, epoch)
             val_loss = compute_val_loss(val_dataloader, model, loss_function)
@@ -182,6 +188,8 @@ def decode(output):
                 decoded_sequence.append(label.item())
             previous_label = label
         decoded_output.append(decoded_sequence)
+    decoded_output  = decoded_output[0][:-1]
+    print(decoded_output)
     return decoded_output
 
 def compute_accuracy(dataloader, model, decode):
@@ -194,7 +202,7 @@ def compute_accuracy(dataloader, model, decode):
             
             output = model(data,input_lengths)
             # print(output.shape)
-            output = output
+            
             # print(output)
             decoded_output = decode(output)
             # print(decoded_output)
