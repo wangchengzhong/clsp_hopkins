@@ -1,27 +1,17 @@
 import os
-import sys
-import string
 import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from torch import nn
-from torch.nn.utils.rnn import pad_sequence
 from dataset import AsrDataset
 from model import LSTM_ASR
 import numpy as np
 from sklearn.model_selection import train_test_split
 from test_script.crnn.models.crnn import CRNN
-# torch.backends.cudnn.deterministic = True 
-# hyper parameters
-global device,debug,test_debug,test_mode,gNumEpoch,gBatchSize,gLr
-debug = False
-test_debug = False
-train_mode = True
-gNumEpoch = 2000
-gBatchSize = 15
-gLr =  1e-4
-device = torch.device("cuda:0")
-use_pretrained = True
+from ctc_decoder import beam_search
+from config import debug,device,gBatchSize,test_debug,in_seq_length
+import config as cf
+
 def get_dimensions(lst):
     if isinstance(lst, list):
         return [len(lst)] + get_dimensions(lst[0]) if lst else []
@@ -49,22 +39,17 @@ def collate_fn(batch):
     target_lengths = torch.tensor([len(word_spellings[i]) for i in range(len(word_spellings))],dtype=torch.int32)
     word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist],dtype=torch.int32)# [torch.tensor(w) for w in word_spellings]
     
-    input_lengths = torch.tensor([int(len(feature) * 60 / 182) for feature in features])
-
-    # old_version when input feature is one-hot 
-    # features = [[np.eye(256)[np.array(one_frame_feature)-1] for one_frame_feature in one_word_feature]  for one_word_feature in features]
+    input_lengths = torch.tensor([int(len(feature) * 60 / in_seq_length) for feature in features])
+    if not cf.use_vectorized_feature: # then use one-hot
+        # old_version when input feature is one-hot 
+        features = [[np.eye(256)[np.array(one_frame_feature)-1] for one_frame_feature in one_word_feature]  for one_word_feature in features]
     
-    padded_features = [np.pad(one_word_feature,((0,182-len(one_word_feature)),(0,0)),'constant',constant_values=0) for one_word_feature in features]
+    padded_features = [np.pad(one_word_feature,((0,in_seq_length-len(one_word_feature)),(0,0)),'constant',constant_values=0) for one_word_feature in features]
     padded_features = torch.stack([torch.tensor(f) for f in padded_features]).float()
 
     # old version when using conv2d
     padded_features = padded_features.unsqueeze(1)
 
-
-    # old version when pad_squence
-    # padded_features = pad_sequence(features, batch_first=False)
-    # if debug: print(f'target:{word_spellings}')
-    # if debug: print(f'input_lengths: {input_lengths}')
     if debug: print(f'pad_feature shape: {padded_features.shape}')
     return padded_features, word_spellings, input_lengths, target_lengths
 
@@ -73,15 +58,15 @@ def train(train_dataloader, model, ctc_loss, optimizer, epoch):
         p.requires_grad = True
     model = model.train().to(device)
     for batch_idx, (data, target, input_lengths, target_lengths) in enumerate(train_dataloader):
-        if debug: print(f'input x model shape: {data.shape}')
+        if debug: print(f'\n\n======begin training batch {batch_idx}\ninput x model shape: {data.shape}')
         optimizer.zero_grad()
         data = data.to(device)
         target = target.to(device)
 
         output = model(data,input_lengths).transpose(0,1).contiguous()# .requires_grad_(True) 
-        if debug: print(f'model output shape: {output.shape}')
+        if debug: print(f'model output shape (after transpose): {output.shape}')
         # input_lengths = torch.tensor([int(output.size(0))  for i in range(output.size(1))],dtype=torch.int32)
-        if debug: print(f'ctcloss input lengths: {input_lengths}\nctcloss target lengths: {target_lengths}')
+        if debug: print(f'ctcloss input lengths:\n {input_lengths}\nctcloss target lengths:\n {target_lengths}\n============== train batch {batch_idx} over\n\n')
 
 
         loss = ctc_loss(output, target, input_lengths, target_lengths)
@@ -95,7 +80,7 @@ def train(train_dataloader, model, ctc_loss, optimizer, epoch):
 
 def main(training):
     #########
-    
+
     training_set = AsrDataset('split/clsp.trnscr.kept','split/clsp.trnlbls.kept','data/clsp.lblnames')
     train_dataset, val_dataset = train_test_split(training_set,test_size=0.2)
     # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
@@ -107,35 +92,32 @@ def main(training):
     test_dataloader = DataLoader(test_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
 
 
-    model = LSTM_ASR(input_size=[182,256],output_size=[60,43])
-    #  model = CRNN(imgH=256,nc=1,nclass=26,nh=5)
+    model = LSTM_ASR(input_size=[in_seq_length,256],output_size=[60,cf.gOutputSize])
+
     # your can simply import ctc_loss from torch.nn
     loss_function = nn.CTCLoss(zero_infinity = True)
 
     # optimizer is provided
-    optimizer = torch.optim.Adam(model.parameters(), lr=gLr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cf.gLr)
     # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4,momentum=0.9)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience = 1000,factor=0.99999)
     
     # Training
-    model_path = f'checkpoint/model_out_phoneme_batch_{gBatchSize+1000}_lr_{gLr}.pth'
-    pretrained_model_path = 'checkpoint/model_trial.pth'
-    num_epochs = gNumEpoch
     if(training):
-        if use_pretrained:
-            model.load_state_dict(torch.load(pretrained_model_path))
+        if cf.use_pretrained:
+            model.load_state_dict(torch.load(cf.pretrained_model_path))
             model.train()
             print('have load model')
-        for epoch in range(num_epochs):
+        for epoch in range(cf.gNumEpoch):
             train(train_dataloader, model, loss_function, optimizer, epoch)
             val_loss = compute_val_loss(val_dataloader, model, loss_function)
             # scheduler.step(val_loss)
-            torch.save(model.state_dict(),model_path)
+            if epoch % 50 == 0:
+                torch.save(model.state_dict(),cf.model_path.split('.pth')[0]+f'epoch_{epoch}.pth')
             if debug: print('\n\n\n')
     else:
-        model_path = 'checkpoint/model_trial.pth'
-        if os.path.exists(model_path):
-            model.load_state_dict(torch.load(model_path))
+        if os.path.exists(cf.test_model_path):
+            model.load_state_dict(torch.load(cf.test_model_path))
             model.eval()
             model = model.to(device)
         for batch_idx,(data, target, input_lengths, target_lengths) in enumerate(test_dataloader):
@@ -143,7 +125,7 @@ def main(training):
             data = data.to(device)
             output = model(data,input_lengths)# .requires_grad_(True)
             if test_debug: print(f'model output shape: {output.shape}')
-            decoded_output = decode(output)
+            # decoded_output = decode(output)
 
         accuracy = compute_accuracy(test_dataloader,model,decode)
         print('Test Accuracy: {:.2f}%'.format(accuracy * 100))
@@ -163,11 +145,23 @@ def compute_val_loss(dataloader, model, loss_function):
             loss = loss_function(output,target,input_lengths,target_lengths)
             total_loss += loss.item()
     return total_loss / len(dataloader)
-
+def beam_search_decode(output,beam_size):
+    output = output[0]
+    sequences = [[list(),1.0]]
+    for row in output:
+        all_candidates = []
+        for i in range(len(sequences)):
+            seq,score = sequences[i]
+            for j in range(len(row)):
+                candidate = [seq+[j],score*-row[j].cpu()]
+                all_candidates.append(candidate)
+        ordered = sorted(all_candidates, key=lambda tup:tup[1])
+        sequences = ordered[:beam_size]
+    print(sequences[0][0])
+    return sequences[0][0]
 def decode(output):
     #贪婪解码
     # print(f'original output shape: {output}')
-    # output = output.transpose(0,1)
     if test_debug: print(f'model output.shape:{output.shape}')
     # old version: find the largest
     output = torch.argmax(output,dim=-1)
@@ -204,7 +198,7 @@ def compute_accuracy(dataloader, model, decode):
             # print(output.shape)
             
             # print(output)
-            decoded_output = decode(output)
+            decoded_output = beam_search_decode(output,10)
             # print(decoded_output)
             for i in range(len(decoded_output)):
                 if(i<len(target)):
@@ -214,4 +208,4 @@ def compute_accuracy(dataloader, model, decode):
     return correct/total
 
 if __name__ == "__main__":
-    main(training=train_mode)
+    main(training = cf.train_mode)

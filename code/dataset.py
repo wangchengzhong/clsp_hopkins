@@ -9,6 +9,7 @@ from gensim.models import Word2Vec
 from g2p_en import G2p
 from collections import Counter
 import soundfile as sf
+import config as cf
 class AsrDataset(Dataset):
     def __init__(self, scr_file, feature_file=None,
                  feature_label_file=None,
@@ -31,34 +32,36 @@ class AsrDataset(Dataset):
         # load data
         self.script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
         # # new version when using g2p to convert script to phonemes
-        self.script = [g2p(word) for word in self.script]
-        self.phonemes = list(set([phoneme for sublist in self.script for phoneme in sublist]))
-        # self.phonemes_counts = Counter([phoneme for sublist in self.script for phoneme in sublist])
-        phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
-        self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
-        self.script = [[0] + array + [0] for array in self.script] # max length (including 0): 10
+        if cf.use_phoneme:
+            self.script = [g2p(word) for word in self.script]
+            self.phonemes = list(set([phoneme for sublist in self.script for phoneme in sublist]))
+            # self.phonemes_counts = Counter([phoneme for sublist in self.script for phoneme in sublist])
+            phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
+            self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
+            self.script = [[0] + array + [0] for array in self.script] # max length (including 0): 10
+        else:
+            # old version when script is not phoneme but word itself
+            self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
 
-        # old version when script is not phoneme but word itself
-        # self.script = [[self.char_to_int(c) for c in str] for str in self.script ]
+            # old version when only using 0 at start and end of array
+            self.script = [[0] + array + [0] for array in self.script]
 
-        # old version when only using 0 at start and end of array
-        # self.script = [[0] + array + [0] for array in self.script]
-
-        # new version when add 0 at each interval
-        # self.script = [[0] + [item for sublist in [[i,0] for i in array] for item in sublist] for array in self.script]
+            # new version when add 0 at each interval
+            # self.script = [[0] + [item for sublist in [[i,0] for i in array] for item in sublist] for array in self.script]
 
         
         self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
-
-        # new version when features is converted by Word2Vec
-        self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
-        self.model = Word2Vec(self.features,vector_size=256,min_count=1,workers=5)
-        # # print(f"model testing: {self.model.wv['GQ']}")
-
-        # old version when features is one_hot
-        # self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
-        # code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
-        # self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
+        
+        if cf.use_vectorized_feature:
+            # new version when features is converted by Word2Vec
+            self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
+            self.model = Word2Vec(self.features,vector_size=256,min_count=1,workers=5)
+            # # print(f"model testing: {self.model.wv['GQ']}")
+        else:
+            # old version when features is one_hot
+            self.labels = np.array(pd.read_csv(feature_label_file, header=None).values.tolist()[1:]).flatten().tolist()
+            code_to_index = {''.join(code): i for i, code in enumerate(self.labels)}
+            self.features = [[code_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
 
         # self.mfcc_features = self.compute_mfcc(wav_scp = wav_scp, wav_dir = wav_dir)
         
@@ -81,10 +84,12 @@ class AsrDataset(Dataset):
         """
         
         spelling_of_word = self.script[idx]# older version in one-hot np.eye(26)[np.array(self.script[idx])-1]
-        # old version when feature is one-hot
-        # feature = self.features[idx] # older version in one-hot np.eye(256)[np.array(self.features[idx])-1]
-        # new version when feature is processed by Word2Vec
-        feature = [self.model.wv[a] for a in self.features[idx]]
+        if cf.use_vectorized_feature:
+            # new version when feature is processed by Word2Vec
+            feature = [self.model.wv[a] for a in self.features[idx]]
+        else:
+            # old version when feature is one-hot
+            feature = self.features[idx] # older version in one-hot np.eye(256)[np.array(self.features[idx])-1]
 
         return feature, spelling_of_word
 

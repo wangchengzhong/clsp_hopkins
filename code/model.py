@@ -3,13 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import torch.nn.init as init
-global debug
-debug = False
+from config import debug,in_seq_length,hidden_size
 class LSTM_ASR(torch.nn.Module):
-    def __init__(self, input_size=[182,256], hidden_size=17, num_layers=3,
+    def __init__(self, input_size=[in_seq_length,256], hidden_size=hidden_size, num_layers=3,
                  output_size=[62,26],feature_type="quantized"):
         super().__init__()
-
+        if debug: print('\n============model initializing start')
         self.output_size = output_size
         assert feature_type in ['quantized', 'mfcc']
 
@@ -19,7 +18,7 @@ class LSTM_ASR(torch.nn.Module):
         self.conv_out_seq_length = 84# input_size[1]
         self.lstm = nn.LSTM(input_size=self.conv_out_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True,bidirectional=True)
         self.fc = nn.Linear(in_features = hidden_size * 2, out_features = output_size[1])
-
+        if debug: print('============model initializing finished\n')
         # for m in self.modules():
         #     if isinstance(m,nn.Conv2d):
         #         init.kaiming_normal_(m.weight)
@@ -30,6 +29,7 @@ class LSTM_ASR(torch.nn.Module):
         #         init.constant_(m.bias,0)
 
     def forward(self, batch_features, input_lengths):
+        if debug: print('\n=============model forward begin')
         """
         :param batch_features: batched acoustic features
         :return: the output of your model (e.g., log probability)
@@ -71,4 +71,5 @@ class LSTM_ASR(torch.nn.Module):
         x = x.view(-1,self.output_size[0],self.output_size[1])
         if debug: print(f'model output shape: {x.shape}')
         x = F.log_softmax(x,dim=-1)
+        if debug: print('=============model forward over\n')
         return x
