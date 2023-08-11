@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from torch import nn
-from dataset import AsrDataset
+from dataset import AsrDataset,Phonemes
 from model import LSTM_ASR
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -38,7 +38,7 @@ def collate_fn(batch):
     
     # old version when word_spellings is flattened
     target_lengths = torch.tensor([len(word_spellings[i]) for i in range(len(word_spellings))],dtype=torch.int32)
-    word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist],dtype=torch.int32) # [torch.tensor(w) for w in word_spellings]
+    word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist],dtype=torch.int32)
     
     input_lengths = torch.tensor([int(len(feature) * cf.out_seq_length / cf.in_seq_length) for feature in features])
     def one_hot(indices, depth=256):
@@ -105,7 +105,7 @@ def main(training):
     # optimizer is provided
     optimizer = torch.optim.Adam(model.parameters(), lr=cf.gLr)
     # optimizer = torch.optim.SGD(model.parameters(),lr=1e-4,momentum=0.9)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience = 20, factor=0.1)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience = 1000, factor=0.1)
     
     # Training
     if(training):
@@ -126,11 +126,11 @@ def main(training):
         plt.xlabel('epoch')
         plt.ylabel('test loss')
         plt.title(cf.model_path)
-        plt.savefig(test_path+'.png')
+        plt.savefig(cf.model_path.split('.pth')[0]+f'epoch_{cf.test_epoch_num}.pth'+'.png')
         plt.show()
     else:
         test_path = cf.test_model_path.split('.pth')[0]+f'epoch_{cf.test_epoch_num}.pth'
-        if os.path.exists(test_path):
+        if os.path.exists(test_path):        
             model.load_state_dict(torch.load(test_path))
             model = model.to(device)
             model.eval()
@@ -178,14 +178,14 @@ def beam_search_decode(output,beam_size,input_lengths):
 
 def int_to_char(int_val):
     return chr(int_val + 96)
-def get_closest_word(decoded_output):
-    with open('data/clsp.trnscr','r') as file:
-        words = list(set([line.strip() for line in file][1:]))
+def get_closest_word(decoded_output, words):
+
     decoded_word = ''.join(decoded_output)
-    closest_word = difflib.get_close_matches(decoded_word,words,n=1)
+    closest_word = difflib.get_close_matches(decoded_word,words,n=1,cutoff=0.3)
     return closest_word[0] if closest_word else "哇塞"
 
-def decode(output, input_lengths):
+def decode(output, input_lengths, words, phonemes_class):
+
     #贪婪解码
     # print(f'original output shape: {output}')
     if test_debug: print(f'model output.shape:{output.shape}')
@@ -206,40 +206,53 @@ def decode(output, input_lengths):
     previous_label = blank_label
     for label in output:
         if label!=blank_label and label != previous_label:
-            decoded_sequence.append(int_to_char(label.item()))
+            if not cf.use_phoneme:
+                decoded_sequence.append(int_to_char(label.item()))
+            else:
+                decoded_sequence.append(phonemes_class.int_to_phonemes[label.item()])
         previous_label = label
     decoded_output.append(decoded_sequence)
-
     decoded_output  = decoded_output[0]
+
+    decoded_output = get_closest_word(decoded_output, words)
     
-    decoded_output = get_closest_word(decoded_output)
-    # print(decoded_output)
     return decoded_output
 
 def compute_accuracy(dataloader, model, decode):
     correct = 0
     total = 0
+    if cf.use_phoneme:
+        phonemes_class = Phonemes('data/clsp.trnscr')
+        words = phonemes_class.word_phonemes
+    else: 
+        phonemes_class = None
+        with open('data/clsp.trnscr','r') as file:
+            words = list(set([line.strip() for line in file][1:]))
     with torch.no_grad():
         for batch_idx,(data,target,input_lengths,output_lengths) in enumerate(dataloader):
             data = data.to(device)
             output = model(data,input_lengths)[0]
             # print(torch.argmax(output,dim=-1))
             if cf.greedy_decode:
-                decoded_output = decode(output,input_lengths)
+                decoded_output = decode(output,input_lengths,words,phonemes_class)
             else:
                 decoded_output = beam_search_decode(output,10,input_lengths)
-            target = ''.join([int_to_char(t.item()) for t in target][1:-1])
+            if not cf.use_phoneme:
+                target = ''.join([int_to_char(t.item()) for t in target[1:-1]])
+            else:
+                target = ''.join([phonemes_class.int_to_phonemes[t.item()] for t in target[1:-1]])
             # print(f'target:{target}')
             # old version when decoded_output is merged to 48 words
-            # if decoded_output == target:
-            #     correct+=1
-            # total+=1
+            print(f'decoded_output:{decoded_output},target:{target}')
+            if decoded_output == target:
+                correct+=1
+            total+=1
             # new version when decoded_output is original
-            for i in range(len(decoded_output)):
-                if(i<len(target)):
-                    if decoded_output[i] == target[i]:
-                        correct+=1
-                total+=1
+            # for i in range(len(decoded_output)):
+            #     if(i<len(target)):
+            #         if decoded_output[i] == target[i]:
+            #             correct+=1
+            #     total+=1
     return correct / total
 
 if __name__ == "__main__":

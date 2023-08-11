@@ -10,6 +10,35 @@ from g2p_en import G2p
 from collections import Counter
 import soundfile as sf
 import config as cf
+from sklearn.preprocessing import StandardScaler
+
+def get_feature_vec_model(vec_model_path, train_mode = False, feature_file = None):
+    if train_mode:
+        features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
+        features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in features]
+        model = Word2Vec(features,vector_size=256,min_count=1,workers=5)
+        model.save(vec_model_path)
+    else:
+        model = Word2Vec.load(vec_model_path)
+    return model
+
+class Phonemes:
+    def __init__(self,scr_file):
+        g2p = G2p()
+        script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
+        self.words = list(set([word for word in script]))
+        self.word_phonemes = [''.join(g2p(word)) for word in self.words]
+        self.word_to_phonemes = {word: g2p(word) for word in self.words}
+        self.phonemes_to_word = {''.join(g2p(word)): word for word in script}
+
+        self.phonemes = list(set([phoneme for sublist in self.word_to_phonemes.values() for phoneme in sublist]))
+        self.phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
+        self.int_to_phonemes = {i+1: phoneme for i, phoneme in enumerate(self.phonemes)}
+
+    def words_to_phonemes_int(self, words):
+        phonemes = [self.word_to_phonemes[word] for word in words]
+        return [[self.phonemes_to_int[phoneme] for phoneme in one_word_phoneme] for one_word_phoneme in phonemes]
+
 class AsrDataset(Dataset):
     def __init__(self, scr_file, feature_file=None,
                  feature_label_file=None,
@@ -22,23 +51,18 @@ class AsrDataset(Dataset):
         :param wav_scp: clsp.trnwav or clsp.devwav
         :param wav_dir: wavforms/
         """
-        g2p = G2p()
         self.feature_type = feature_type
         assert self.feature_type in ['quantized', 'mfcc']
 
         self.blank = "<blank>"
         self.silence = "{"
-
-        # load data
+        self.phonemes = None
         self.script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
         # # new version when using g2p to convert script to phonemes
         if cf.use_phoneme:
-            self.script = [g2p(word) for word in self.script]
-            self.phonemes = list(set([phoneme for sublist in self.script for phoneme in sublist]))
-            # self.phonemes_counts = Counter([phoneme for sublist in self.script for phoneme in sublist])
-            phonemes_to_int = {phoneme: i+1 for i, phoneme in enumerate(self.phonemes)}
-            self.script = [[phonemes_to_int[phoneme] for phoneme in one_word_phoneme]for one_word_phoneme in self.script]
-            self.script = [[0] + array + [0] for array in self.script] # max length (including 0): 10
+            self.phoneme_class = Phonemes(scr_file)
+            self.script = self.phoneme_class.words_to_phonemes_int(self.script)
+            self.script = [[0] + array + [0] for array in self.script]
         else:
             # old version when script is not phoneme but word itself
             self.script = [[self.letter_to_int(c) for c in str] for str in self.script ]
@@ -56,7 +80,8 @@ class AsrDataset(Dataset):
             if cf.use_vectorized_feature:
                 # new version when features is converted by Word2Vec
                 self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
-                self.model = Word2Vec(self.features,vector_size=256,min_count=1,workers=5)
+                # self.model = Word2Vec(self.features,vector_size=256,min_count=1,workers=5)
+                self.model = get_feature_vec_model(cf.word_vec_path, train_mode=False, feature_file=feature_file)
                 # # print(f"model testing: {self.model.wv['GQ']}")
             else:
                 # old version when features is one_hot
@@ -108,6 +133,7 @@ class AsrDataset(Dataset):
         :param wav_dir:
         :return: features: List[np.ndarray, ...]
         """
+        scaler = StandardScaler()
         features = []
         with open(wav_scp, 'r') as f:
             for wavfile in f:
@@ -119,8 +145,9 @@ class AsrDataset(Dataset):
                 wav, sr = sf.read(os.path.join(wav_dir, wavfile))
                 wav = wav[np.nonzero(wav)[0]]
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()
+                feats = scaler.fit_transform(feats)
                 features.append(feats)
         return features
 ###########################test module###############################
 # training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames')
-# print(np.max([len(training_set.features[i])for i in range(len(training_set.features))]))
+# print(training_set)
