@@ -21,7 +21,7 @@ class LSTM_ASR(torch.nn.Module):
             # when using mfcc
             self.into_lstm_seq_length = 127 # 19
         else:
-            self.into_lstm_seq_length = 40
+            self.into_lstm_seq_length = 120
         self.lstm = nn.LSTM(input_size=self.into_lstm_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True,bidirectional=True)
         # self.dropout = nn.Dropout(0.5)
         self.fc = nn.Linear(in_features = hidden_size * 2, out_features = output_size[1])

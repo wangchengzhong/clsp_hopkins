@@ -68,6 +68,7 @@ class AsrDataset(Dataset):
             self.script = [[self.letter_to_int(c) for c in str] for str in self.script ]
 
             # old version when only using 0 at start and end of array
+            
             self.script = [[0] + array + [0] for array in self.script]
 
             # new version when add 0 at each interval
@@ -138,14 +139,17 @@ class AsrDataset(Dataset):
         with open(wav_scp, 'r') as f:
             for wavfile in f:
                 wavfile = wavfile.strip()
-                if wavfile == 'jhucsp.trnwav':  # skip header
+                if wavfile == 'jhucsp.trnwav' or wavfile == 'clsp.trnwav':  # skip header
                     continue
                 wavfile_path = os.path.join(wav_dir, wavfile)
                 # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
                 wav, sr = sf.read(os.path.join(wav_dir, wavfile))
                 wav = wav[np.nonzero(wav)[0]]
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()
-                feats = scaler.fit_transform(feats)
+                delta_mfccs = librosa.feature.delta(feats)
+                delta2_mfccs = librosa.feature.delta(feats,order=2)
+                feats = np.concatenate([feats, delta_mfccs, delta2_mfccs],axis=1)
+                # feats = scaler.fit_transform(feats)
                 features.append(feats)
         return features
 ###########################test module###############################

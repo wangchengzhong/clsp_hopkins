@@ -29,13 +29,6 @@ def collate_fn(batch):
     """
     features, word_spellings = zip(*batch)
     
-    
-    # new version when word_spelling is padded, still no use
-    # target_lengths = torch.tensor([len(word_spellings[i])for i in range(len(word_spellings))])
-    # word_spellings = torch.tensor([sublist + [0]*(15-len(sublist)) for sublist in word_spellings])
-    # word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist])
-    # if debug: print(f'word spellings shape after padding: {word_spellings.shape}')
-    
     # old version when word_spellings is flattened
     target_lengths = torch.tensor([len(word_spellings[i]) for i in range(len(word_spellings))],dtype=torch.int32)
     word_spellings = torch.tensor([item for sublist in word_spellings for item in sublist],dtype=torch.int32)
@@ -57,7 +50,9 @@ def collate_fn(batch):
     if debug: print(f'pad_feature shape: {padded_features.shape}')
     return padded_features, word_spellings, input_lengths, target_lengths
 
-def train(train_dataloader, model, ctc_loss, optimizer, epoch):
+def train(train_dataloader, model, ctc_loss, optimizer, epoch, train_loss):
+    total_loss = 0
+    num_batches = 0
     for p in model.parameters():
         p.requires_grad = True
     model = model.train().to(device)
@@ -73,22 +68,29 @@ def train(train_dataloader, model, ctc_loss, optimizer, epoch):
         if debug: print(f'ctcloss input lengths:\n {input_lengths}\nctcloss target lengths:\n {target_lengths}\n============== train batch {batch_idx} over\n\n')
 
         loss = ctc_loss(output, target, input_lengths, target_lengths)
-
+        total_loss += loss.item()
+        num_batches += 1
         loss.backward()
         if batch_idx % 100 == 0:
             print(f'Epoch: {epoch+1},Batch: {batch_idx+1}/{len(train_dataloader)},loss:{loss.item()}')
 
         optimizer.step()
+    
+    avg_train_loss = total_loss / num_batches
+    train_loss.append(avg_train_loss)
 
 
 def main(training):
     #########
-    test_loss = []
-    training_set = AsrDataset('split/clsp.trnscr.kept','split/clsp.trnlbls.kept','data/clsp.lblnames')
-    train_dataset, val_dataset = train_test_split(training_set,test_size=0.2)
-    # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
-    test_set = AsrDataset('split/clsp.trnscr.held','split/clsp.trnlbls.held','data/clsp.lblnames')
-
+    test_loss, train_loss = [], []
+    if cf.feature_type == "quantized":
+        training_set = AsrDataset('split/clsp.trnscr.kept','split/clsp.trnlbls.kept','data/clsp.lblnames')
+        train_dataset, val_dataset = train_test_split(training_set,test_size=0.2)
+        # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
+        test_set = AsrDataset('split/clsp.trnscr.held','split/clsp.trnlbls.held','data/clsp.lblnames')
+    else:
+        training_set = AsrDataset(scr_file='split/clsp.trnscr.kept',wav_scp='split/clsp.trnwav.kept',wav_dir='data/waveforms')
+        test_set = AsrDataset(scr_file='split/clsp.trnscr.held',wav_scp='split/clsp.trnwav.held',wav_dir='data/waveforms')
     train_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     val_dataloader = DataLoader(test_set, batch_size=gBatchSize,shuffle=False,collate_fn=collate_fn)
     if cf.use_trainset_to_test:
@@ -114,7 +116,7 @@ def main(training):
             model.train()
             print('have load model')
         for epoch in range(cf.gNumEpoch):
-            train(train_dataloader, model, loss_function, optimizer, epoch)
+            train(train_dataloader, model, loss_function, optimizer, epoch, train_loss)
             val_loss = compute_val_loss(val_dataloader, model, loss_function)
             scheduler.step(val_loss)
             test_loss.append(val_loss)
@@ -122,9 +124,10 @@ def main(training):
                 torch.save(model.state_dict(),cf.model_path.split('.pth')[0]+f'epoch_{epoch}.pth')
             if debug: print('\n\n\n')
 
-        plt.plot(test_loss)
+        plt.plot(train_loss,label='train loss')
+        plt.plot(test_loss, label='test loss')
         plt.xlabel('epoch')
-        plt.ylabel('test loss')
+        plt.ylabel('loss')
         plt.title(cf.model_path)
         plt.savefig(cf.model_path.split('.pth')[0]+f'epoch_{cf.test_epoch_num}.pth'+'.png')
         plt.show()
@@ -175,9 +178,19 @@ def beam_search_decode(output,beam_size,input_lengths):
     print(res)
     return res
     
-
+def compute_word_probabilities(output, target_words, ctc_loss, input_lengths):
+    probabilities = []
+    for target_word in target_words:
+        target = torch.tensor([0] + [char_to_int(c) for c in target_word] + [0],dtype=torch.int32)
+        loss = ctc_loss(output,target,input_lengths,torch.tensor([len(target_word)+2]))
+        probability = torch.exp(-loss).item()
+        probabilities.append(probability)
+    probabilities = [p/sum(probabilities) for p in probabilities]
+    return probabilities
 def int_to_char(int_val):
     return chr(int_val + 96)
+def char_to_int(char):
+    return ord(char) - ord('a') + 1
 def get_closest_word(decoded_output, words):
 
     decoded_word = ''.join(decoded_output)
@@ -185,12 +198,17 @@ def get_closest_word(decoded_output, words):
     return closest_word[0] if closest_word else "哇塞"
 
 def decode(output, input_lengths, words, phonemes_class):
-
     #贪婪解码
-    # print(f'original output shape: {output}')
     if test_debug: print(f'model output.shape:{output.shape}')
+    # new version when calculating probabilities
+    # output = output[:int(input_lengths.cpu().item())]
+    # probabilities, indices = torch.max(output,dim=-1)
+    # probabilities = torch.exp(probabilities).to('cpu')
+    # sequence_probability = torch.prod(probabilities).item()
+
+    # output = indices.to('cpu')
+
     # old version: find the largest
-    output = output[:int(input_lengths.cpu().item())]
     output = torch.argmax(output,dim=-1).to('cpu')
 
     # find the 2nd largest
@@ -221,6 +239,7 @@ def decode(output, input_lengths, words, phonemes_class):
 def compute_accuracy(dataloader, model, decode):
     correct = 0
     total = 0
+    ctc_loss = nn.CTCLoss(zero_infinity=True)
     if cf.use_phoneme:
         phonemes_class = Phonemes('data/clsp.trnscr')
         words = phonemes_class.word_phonemes
@@ -232,7 +251,9 @@ def compute_accuracy(dataloader, model, decode):
         for batch_idx,(data,target,input_lengths,output_lengths) in enumerate(dataloader):
             data = data.to(device)
             output = model(data,input_lengths)[0]
+            probabilities = compute_word_probabilities(output, words, ctc_loss,input_lengths)
             # print(torch.argmax(output,dim=-1))
+            
             if cf.greedy_decode:
                 decoded_output = decode(output,input_lengths,words,phonemes_class)
             else:
@@ -243,8 +264,9 @@ def compute_accuracy(dataloader, model, decode):
                 target = ''.join([phonemes_class.int_to_phonemes[t.item()] for t in target[1:-1]])
             # print(f'target:{target}')
             # old version when decoded_output is merged to 48 words
-            print(f'decoded_output:{decoded_output},target:{target}')
-            if decoded_output == target:
+            decoded_output_ = words[np.argmax(probabilities)]
+            print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+            if decoded_output_ == target:
                 correct+=1
             total+=1
             # new version when decoded_output is original
