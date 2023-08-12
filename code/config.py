@@ -5,8 +5,8 @@ train_mode = False
 debug= False
 test_debug= False
 
-gNumEpoch = 100
-gBatchSize = 8  #13 15
+gNumEpoch = 1000
+gBatchSize = 8 # 8  #13 15
 gLr = 1e-3
 device= torch.device("cuda:0")
 
@@ -24,8 +24,8 @@ def get_feature_params(feature_type):
         return 182,             90,              256,             103 # 87 90 99 93
     else:#                               #MFCC#
         #      in_seq_length    out_seq_length   feature_size     hidden_size
-        return 85,              85,              120,             93 # 93
-    
+        return 185,              93,              120,             103# 67 # 93
+    #          85                85
 in_seq_length, out_seq_length, feature_size, hidden_size = get_feature_params(feature_type)
 
 greedy_decode = True
@@ -40,5 +40,5 @@ pretrained_model_path = 'checkpoint/model_epoch1000_lr_0.005.pth'
 
 use_trainset_to_test = False
 test_batch_size = 1
-test_epoch_num = 23
+test_epoch_num = 22 # 430
 test_model_path= f'{folder_path}/model_{feature_type}_hiddensize_{hidden_size}_output_{gOutputSize}_batch_{gBatchSize}_lr_{gLr}_vec_{1 if use_vectorized_feature else 0}.pth'

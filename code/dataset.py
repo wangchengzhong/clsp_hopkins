@@ -27,7 +27,7 @@ class Phonemes:
         g2p = G2p()
         script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
         self.words = list(set([word for word in script]))
-        self.word_phonemes = [''.join(g2p(word)) for word in self.words]
+        self.word_phonemes = [g2p(word) for word in self.words]
         self.word_to_phonemes = {word: g2p(word) for word in self.words}
         self.phonemes_to_word = {''.join(g2p(word)): word for word in script}
 
@@ -144,14 +144,14 @@ class AsrDataset(Dataset):
                 wavfile_path = os.path.join(wav_dir, wavfile)
                 # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
                 wav, sr = sf.read(os.path.join(wav_dir, wavfile))
-                wav = wav[np.nonzero(wav)[0]]
+                # wav = wav[np.nonzero(wav)[0]]
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()
                 delta_mfccs = librosa.feature.delta(feats)
                 delta2_mfccs = librosa.feature.delta(feats,order=2)
                 feats = np.concatenate([feats, delta_mfccs, delta2_mfccs],axis=1)
-                # feats = scaler.fit_transform(feats)
+                feats = scaler.fit_transform(feats)
                 features.append(feats)
         return features
 ###########################test module###############################
-# training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames')
-# print(training_set)
+# training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames',wav_scp='data/clsp.trnwav',wav_dir='data/waveforms')
+# print(np.max([len(a) for a in training_set.features]))

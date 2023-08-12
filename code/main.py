@@ -178,13 +178,17 @@ def beam_search_decode(output,beam_size,input_lengths):
     print(res)
     return res
     
-def compute_word_probabilities(output, target_words, ctc_loss, input_lengths):
+def compute_word_probabilities(output, target_words, ctc_loss, input_lengths, phonemes_class):
     probabilities = []
     for target_word in target_words:
-        target = torch.tensor([0] + [char_to_int(c) for c in target_word] + [0],dtype=torch.int32)
+        if not cf.use_phoneme:
+            target = torch.tensor([0] + [char_to_int(c) for c in target_word] + [0],dtype=torch.int32)
+        else:
+            target = torch.tensor([0] + [phonemes_class.phonemes_to_int[c] for c in target_word] + [0], dtype=torch.int32)
         loss = ctc_loss(output,target,input_lengths,torch.tensor([len(target_word)+2]))
         probability = torch.exp(-loss).item()
         probabilities.append(probability)
+        
     probabilities = [p/sum(probabilities) for p in probabilities]
     return probabilities
 def int_to_char(int_val):
@@ -200,13 +204,6 @@ def get_closest_word(decoded_output, words):
 def decode(output, input_lengths, words, phonemes_class):
     #贪婪解码
     if test_debug: print(f'model output.shape:{output.shape}')
-    # new version when calculating probabilities
-    # output = output[:int(input_lengths.cpu().item())]
-    # probabilities, indices = torch.max(output,dim=-1)
-    # probabilities = torch.exp(probabilities).to('cpu')
-    # sequence_probability = torch.prod(probabilities).item()
-
-    # output = indices.to('cpu')
 
     # old version: find the largest
     output = torch.argmax(output,dim=-1).to('cpu')
@@ -215,8 +212,7 @@ def decode(output, input_lengths, words, phonemes_class):
     # _, indices = torch.topk(output,2,dim=-1)
     # output = indices[:,:,1]
     if test_debug: print(f'output:{output}')
-    
-    # print(f'output shape: {output[3]}')
+
     decoded_output=[]
     blank_label= 0
     # for sequence in output:
@@ -229,7 +225,7 @@ def decode(output, input_lengths, words, phonemes_class):
             else:
                 decoded_sequence.append(phonemes_class.int_to_phonemes[label.item()])
         previous_label = label
-    decoded_output.append(decoded_sequence)
+    decoded_output.append(decoded_sequence) if not cf.use_phoneme else decoded_output.append(''.join(decoded_sequence))
     decoded_output  = decoded_output[0]
 
     decoded_output = get_closest_word(decoded_output, words)
@@ -243,6 +239,8 @@ def compute_accuracy(dataloader, model, decode):
     if cf.use_phoneme:
         phonemes_class = Phonemes('data/clsp.trnscr')
         words = phonemes_class.word_phonemes
+
+
     else: 
         phonemes_class = None
         with open('data/clsp.trnscr','r') as file:
@@ -251,7 +249,7 @@ def compute_accuracy(dataloader, model, decode):
         for batch_idx,(data,target,input_lengths,output_lengths) in enumerate(dataloader):
             data = data.to(device)
             output = model(data,input_lengths)[0]
-            probabilities = compute_word_probabilities(output, words, ctc_loss,input_lengths)
+            probabilities = compute_word_probabilities(output, words, ctc_loss, input_lengths, phonemes_class)
             # print(torch.argmax(output,dim=-1))
             
             if cf.greedy_decode:
@@ -260,12 +258,14 @@ def compute_accuracy(dataloader, model, decode):
                 decoded_output = beam_search_decode(output,10,input_lengths)
             if not cf.use_phoneme:
                 target = ''.join([int_to_char(t.item()) for t in target[1:-1]])
+                decoded_output_ = words[np.argmax(probabilities)]
             else:
                 target = ''.join([phonemes_class.int_to_phonemes[t.item()] for t in target[1:-1]])
+                decoded_output_ = ''.join(words[np.argmax(probabilities)])
             # print(f'target:{target}')
             # old version when decoded_output is merged to 48 words
-            decoded_output_ = words[np.argmax(probabilities)]
-            print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+            
+            # print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
             if decoded_output_ == target:
                 correct+=1
             total+=1
