@@ -11,6 +11,7 @@ from collections import Counter
 import soundfile as sf
 import config as cf
 from sklearn.preprocessing import StandardScaler
+from utils import DataExtension
 
 def get_feature_vec_model(vec_model_path, train_mode = False, feature_file = None):
     if train_mode:
@@ -139,19 +140,24 @@ class AsrDataset(Dataset):
         with open(wav_scp, 'r') as f:
             for wavfile in f:
                 wavfile = wavfile.strip()
-                if wavfile == 'jhucsp.trnwav' or wavfile == 'clsp.trnwav':  # skip header
+                if wavfile == 'jhucsp.trnwav' or wavfile == 'clsp.trnwav' or wavfile == 'clsp.trnwav.extend':  # skip header
                     continue
                 wavfile_path = os.path.join(wav_dir, wavfile)
                 # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
                 wav, sr = sf.read(os.path.join(wav_dir, wavfile))
                 # wav = wav[np.nonzero(wav)[0]]
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()
-                delta_mfccs = librosa.feature.delta(feats)
-                delta2_mfccs = librosa.feature.delta(feats,order=2)
+                delta_mfccs = scaler.fit_transform(librosa.feature.delta(feats))
+                delta2_mfccs = scaler.fit_transform(librosa.feature.delta(feats,order=2))
                 feats = np.concatenate([feats, delta_mfccs, delta2_mfccs],axis=1)
-                feats = scaler.fit_transform(feats)
+                # feats = scaler.fit_transform(feats)
                 features.append(feats)
         return features
 ###########################test module###############################
 # training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames',wav_scp='data/clsp.trnwav',wav_dir='data/waveforms')
 # print(np.max([len(a) for a in training_set.features]))
+
+
+##################################WARNING: RUNNING ONE TIME IS ENOUGH#############################
+# A = DataExtension()
+# A.process_audio_files(wav_dir='data/waveforms/1a',output_dir='data/data_extend')

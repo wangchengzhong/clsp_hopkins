@@ -4,8 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 import torch.nn.init as init
 from config import debug,in_seq_length,hidden_size
+use_gru = False
 class LSTM_ASR(torch.nn.Module):
-    def __init__(self, input_size=[in_seq_length,256], hidden_size=hidden_size, num_layers=1,
+    def __init__(self, input_size=[in_seq_length,256], hidden_size=hidden_size, num_layers=3,
                  output_size=[62,26],feature_type="quantized"):
         super().__init__()
         if debug: print('\n============model initializing start')
@@ -21,16 +22,19 @@ class LSTM_ASR(torch.nn.Module):
             # when using mfcc
             self.into_lstm_seq_length = 127 # 19
         else:
-            #old version when not using cnov2d in mfcc mode
+            
+            #old version when not using conv2d in mfcc mode
             # self.into_lstm_seq_length = 120
-            self.conv1 = nn.Conv2d(1, 2, kernel_size=3,stride=2,padding=1)
+            self.conv1 = nn.Conv2d(1, 1, kernel_size=3,stride=2)
             # self.conv2 = nn.Conv2d(1, 1, kernel_size=3,stride=2)
-            self.bn1 = nn.BatchNorm2d(2)
+            self.bn1 = nn.BatchNorm2d(1)
 
             # when using mfcc
-            self.into_lstm_seq_length = 120 #59*2 # 19
-
-        self.lstm = nn.LSTM(input_size=self.into_lstm_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True,bidirectional=True)
+            self.into_lstm_seq_length = 59# 20 60 #59*2 # 19
+        if not use_gru:
+            self.lstm = nn.LSTM(input_size=self.into_lstm_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True,bidirectional=True)
+        else:
+            self.gru = nn.GRU(input_size=self.into_lstm_seq_length,hidden_size=hidden_size,num_layers=num_layers,batch_first=True,bidirectional=True)
         # self.dropout = nn.Dropout(0.5)
         self.fc = nn.Linear(in_features = hidden_size * 2, out_features = output_size[1])
         if debug: print('============model initializing finished\n')
@@ -75,15 +79,17 @@ class LSTM_ASR(torch.nn.Module):
             x = F.relu(x)
 
             # new version when merge output data
-            x = x.view(x.shape[0],-1,x.shape[1]*x.shape[3])
+            # x = x.view(x.shape[0],-1,x.shape[1]*x.shape[3])
             # if debug: print(f'after 1 conv x shape: {x.shape}')
             # x = F.relu(self.conv2(x))
-            # x = x.squeeze(1)
+            x = x.squeeze(1)
 
         if debug: print(f'after second conv2d: {x.shape}')
         x = nn.utils.rnn.pack_padded_sequence(x,input_lengths,batch_first=True,enforce_sorted=False)
-        x,_ = self.lstm(x)
-
+        if not use_gru:
+            x,_ = self.lstm(x)
+        else:
+            x,_ = self.gru(x)
         x,_ = nn.utils.rnn.pad_packed_sequence(x,batch_first=True,padding_value=0)
         current_length = x.size(1)
         if debug: print(f'after lstm padding length:{current_length}')

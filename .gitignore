@@ -11,3 +11,13 @@ project补充说明.txt
 test_script/
 
 g2p-master/
+
+data/data_extend
+
+data/split/clsp.trnscr.kept.extend
+
+data/split/clsp.trnwav.kept.extend
+
+ref_model/model_mfcc_hiddensize_512_output_26_batch_10_lr_0.001_vec_1epoch_26.pth
+
+ref_model/model_mfcc_hiddensize_512_output_26_batch_10_lr_0.001_vec_1epoch_430.pth

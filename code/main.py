@@ -84,13 +84,13 @@ def main(training):
     #########
     test_loss, train_loss = [], []
     if cf.feature_type == "quantized":
-        training_set = AsrDataset('split/clsp.trnscr.kept','split/clsp.trnlbls.kept','data/clsp.lblnames')
+        training_set = AsrDataset('data/split/clsp.trnscr.kept','data/split/clsp.trnlbls.kept','data/clsp.lblnames')
         train_dataset, val_dataset = train_test_split(training_set,test_size=0.2)
         # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
-        test_set = AsrDataset('split/clsp.trnscr.held','split/clsp.trnlbls.held','data/clsp.lblnames')
+        test_set = AsrDataset('data/split/clsp.trnscr.held','data/split/clsp.trnlbls.held','data/clsp.lblnames')
     else:
-        training_set = AsrDataset(scr_file='split/clsp.trnscr.kept',wav_scp='split/clsp.trnwav.kept',wav_dir='data/waveforms')
-        test_set = AsrDataset(scr_file='split/clsp.trnscr.held',wav_scp='split/clsp.trnwav.held',wav_dir='data/waveforms')
+        training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept.extend',wav_scp='data/split/clsp.trnwav.kept.extend',wav_dir='data/data_extend')
+        test_set = AsrDataset(scr_file='data/split/clsp.trnscr.held',wav_scp='data/split/clsp.trnwav.held',wav_dir='data/waveforms')
     train_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     val_dataloader = DataLoader(test_set, batch_size=gBatchSize,shuffle=False,collate_fn=collate_fn)
     if cf.use_trainset_to_test:
