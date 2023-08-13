@@ -1,16 +1,16 @@
 import torch
 import os
-train_mode = False
+train_mode = True
 
 debug= False
 test_debug= False
 
-gNumEpoch = 100
-gBatchSize = 100 # 8  #13 15
+gNumEpoch = 333
+gBatchSize = 50 # 8  #13 15
 gLr = 1e-3
 device= torch.device("cuda:0")
 
-use_phoneme = True
+use_phoneme = False
 use_vectorized_feature = True
 word_vec_path = 'checkpoint/1avec.model'
 gOutputSize = 26 if not use_phoneme else 43
@@ -24,10 +24,12 @@ def get_feature_params(feature_type):
         return 182,             90,              256,             103 # 87 90 99 93
     else:#                               #MFCC#
         #      in_seq_length    out_seq_length   feature_size     hidden_size
-        return 185,              89,              120,             103# 67 # 93
-    #          85                42,93             120/40
+        return 90,              90,              120,            30#64 # 513# 67 # 93 512 203
+    #          185 90           90  89, 42,93             120/40
 in_seq_length, out_seq_length, feature_size, hidden_size = get_feature_params(feature_type)
 
+use_transformer = True
+use_5_channel = False
 greedy_decode = True
 
 folder_name = f'{feature_type}_output_{gOutputSize}_hs_{hidden_size}'
@@ -40,5 +42,5 @@ pretrained_model_path = 'checkpoint/model_epoch1000_lr_0.005.pth'
 
 use_trainset_to_test = False
 test_batch_size = 1
-test_epoch_num = 239  # 430 #228 239
+test_epoch_num = 22  # 430 #228 239 131
 test_model_path= f'{folder_path}/model_{feature_type}_hiddensize_{hidden_size}_output_{gOutputSize}_batch_{gBatchSize}_lr_{gLr}_vec_{1 if use_vectorized_feature else 0}.pth'

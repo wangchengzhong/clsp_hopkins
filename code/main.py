@@ -89,6 +89,7 @@ def main(training):
         # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
         test_set = AsrDataset('data/split/clsp.trnscr.held','data/split/clsp.trnlbls.held','data/clsp.lblnames')
     else:
+        # training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
         training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept.extend',wav_scp='data/split/clsp.trnwav.kept.extend',wav_dir='data/data_extend')
         test_set = AsrDataset(scr_file='data/split/clsp.trnscr.held',wav_scp='data/split/clsp.trnwav.held',wav_dir='data/waveforms')
     train_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
@@ -265,7 +266,7 @@ def compute_accuracy(dataloader, model, decode):
             # print(f'target:{target}')
             # old version when decoded_output is merged to 48 words
             
-            # print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+            print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
             if decoded_output_ == target:
                 correct+=1
             total+=1

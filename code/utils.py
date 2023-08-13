@@ -2,6 +2,7 @@ import os
 import shutil
 from scipy.signal import butter, iirfilter, lfilter
 import soundfile as sf
+
 #############################DATA EXTENSION#############################
 class DataExtension:
     def __init__(self):
@@ -81,6 +82,3 @@ def extend_clsp_trnscr_kept_file():
                 f.write(line)
             else:
                 f.write(line*38)
-extend_clsp_trnscr_kept_file()
-
-

@@ -12,6 +12,7 @@ import soundfile as sf
 import config as cf
 from sklearn.preprocessing import StandardScaler
 from utils import DataExtension
+import scipy.fftpack as fft
 
 def get_feature_vec_model(vec_model_path, train_mode = False, feature_file = None):
     if train_mode:
@@ -145,14 +146,36 @@ class AsrDataset(Dataset):
                 wavfile_path = os.path.join(wav_dir, wavfile)
                 # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
                 wav, sr = sf.read(os.path.join(wav_dir, wavfile))
-                # wav = wav[np.nonzero(wav)[0]]
+                wav = np.array([0 for _ in range(400)]+wav[np.nonzero(wav)[0]].tolist()+[0 for _ in range(400)])
+                # mfcc_e, mfcc_h = self.hormomorphic_filter(wav)
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()
-                delta_mfccs = scaler.fit_transform(librosa.feature.delta(feats))
-                delta2_mfccs = scaler.fit_transform(librosa.feature.delta(feats,order=2))
+                delta_mfccs = (librosa.feature.delta(feats))
+                delta2_mfccs = (librosa.feature.delta(feats,order=2))
+                # feats = np.concatenate([feats, delta_mfccs, delta2_mfccs],axis=1)
+                # feats = np.concatenate([feats, mfcc_e, mfcc_h, delta_mfccs, delta2_mfccs],axis=1)
                 feats = np.concatenate([feats, delta_mfccs, delta2_mfccs],axis=1)
+
                 # feats = scaler.fit_transform(feats)
                 features.append(feats)
         return features
+    
+    def hormomorphic_filter(self,y):
+        X = fft.fft(y)
+
+        n_co = 29
+        l_lp = np.array([1 if abs(n) <= n_co else 0 for n in range(len(y))])
+
+        ceps = fft.ifft(np.log(np.abs(X))+1e-10)
+
+        ceps_l = ceps * l_lp
+
+        e = np.abs(fft.ifft(np.exp(fft.fft(ceps_l))))
+        h = np.abs(fft.ifft(np.exp(fft.fft(ceps-ceps_l))))
+        mfcc_e = librosa.feature.mfcc(y=e,sr=16e3,n_mfcc=40,hop_length=160,win_length=400).transpose()
+        mfcc_h = librosa.feature.mfcc(y=h,sr=16e3,n_mfcc=40,hop_length=160,win_length=400).transpose()
+
+        return mfcc_e, mfcc_h
+
 ###########################test module###############################
 # training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames',wav_scp='data/clsp.trnwav',wav_dir='data/waveforms')
 # print(np.max([len(a) for a in training_set.features]))
