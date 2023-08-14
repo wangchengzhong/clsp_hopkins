@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from torch import nn
-from dataset import AsrDataset,Phonemes
+from dataset import AsrDataset,Phonemes,AsrDatasetAutoChoose
 from model import LSTM_ASR
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -49,12 +49,26 @@ def collate_fn(batch):
 
     if debug: print(f'pad_feature shape: {padded_features.shape}')
     return padded_features, word_spellings, input_lengths, target_lengths
-
-def train(train_dataloader, model, ctc_loss, optimizer, epoch, train_loss):
+def untie_boosted_output(data,model,input_lengths,boosting_num):
+    output = model(data,input_lengths)
+    feature_len = output.shape[-1] // 3
+    start_index = feature_len * boosting_num
+    end_index = feature_len * (boosting_num + 1)
+    output = output[:,:,start_index:end_index]
+    output = output.transpose(0,1).contiguous()
+    return output
+def train(train_dataloader, model, ctc_loss, optimizer, epoch, train_loss, boosting_num=0):
     total_loss = 0
     num_batches = 0
-    for p in model.parameters():
-        p.requires_grad = True
+    if not cf.use_boosting:
+        for p in model.parameters():
+            p.requires_grad = True
+    else:
+        for p in model.parameters():
+            p.requires_grad = False
+        for param in model.groups[boosting_num].parameters():
+            param.requires_grad = True
+
     model = model.train().to(device)
     for batch_idx, (data, target, input_lengths, target_lengths) in enumerate(train_dataloader):
         if debug: print(f'\n\n======begin training batch {batch_idx}\ninput x model shape: {data.shape}')
@@ -62,7 +76,11 @@ def train(train_dataloader, model, ctc_loss, optimizer, epoch, train_loss):
         data = data.to(device)
         target = target.to(device)
 
-        output = model(data,input_lengths).transpose(0,1).contiguous()# .requires_grad_(True) 
+        if cf.use_boosting:
+            output = untie_boosted_output(data,model,input_lengths,boosting_num)
+        else:
+            output = model(data,input_lengths).transpose(0,1).contiguous()# .requires_grad_(True) 
+
         if debug: print(f'model output shape (after transpose): {output.shape}')
         # input_lengths = torch.tensor([int(output.size(0))  for i in range(output.size(1))],dtype=torch.int32)
         if debug: print(f'ctcloss input lengths:\n {input_lengths}\nctcloss target lengths:\n {target_lengths}\n============== train batch {batch_idx} over\n\n')
@@ -89,8 +107,8 @@ def main(training):
         # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
         test_set = AsrDataset('data/split/clsp.trnscr.held','data/split/clsp.trnlbls.held','data/clsp.lblnames')
     else:
-        # training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
-        training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept.extend',wav_scp='data/split/clsp.trnwav.kept.extend',wav_dir='data/data_extend')
+        training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
+        # training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept.extend',wav_scp='data/split/clsp.trnwav.kept.extend',wav_dir='data/data_extend')
         test_set = AsrDataset(scr_file='data/split/clsp.trnscr.held',wav_scp='data/split/clsp.trnwav.held',wav_dir='data/waveforms')
     train_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     val_dataloader = DataLoader(test_set, batch_size=gBatchSize,shuffle=False,collate_fn=collate_fn)
@@ -98,8 +116,11 @@ def main(training):
         test_dataloader = DataLoader(training_set,batch_size=cf.test_batch_size,shuffle=False,collate_fn=collate_fn)
     else:
         test_dataloader = DataLoader(test_set,batch_size=cf.test_batch_size,shuffle=False,collate_fn=collate_fn)
-
-
+    if cf.use_boosting:
+        with open('data/clsp.trnscr','r') as file:
+            words = list(set([line.strip() for line in file][1:]))
+        autochoose_dataset = AsrDatasetAutoChoose(words,scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
+        autochoose_dataloader = DataLoader(autochoose_dataset,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     model = LSTM_ASR(input_size=[cf.in_seq_length,cf.feature_size],output_size=[cf.out_seq_length,cf.gOutputSize],feature_type=cf.feature_type)
 
     # your can simply import ctc_loss from torch.nn
@@ -111,20 +132,47 @@ def main(training):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,'min',patience = 1000, factor=0.1)
     
     # Training
+    autochoose_pool = []
+    boosting_num = 0
+    max_prob = []
     if(training):
         if cf.use_pretrained:
             model.load_state_dict(torch.load(cf.pretrained_model_path))
             model.train()
             print('have load model')
         for epoch in range(cf.gNumEpoch):
-            train(train_dataloader, model, loss_function, optimizer, epoch, train_loss)
-            val_loss = compute_val_loss(val_dataloader, model, loss_function)
+            if not cf.use_boosting:
+                train(train_dataloader, model, loss_function, optimizer, epoch, train_loss, boosting_num)
+            else:
+                train(autochoose_dataloader, model, loss_function, optimizer, epoch, train_loss, boosting_num)
+            val_loss = compute_val_loss(val_dataloader, model, loss_function, boosting_num)
             scheduler.step(val_loss)
             test_loss.append(val_loss)
             if epoch % 1 == 0:
                 torch.save(model.state_dict(),cf.model_path.split('.pth')[0]+f'epoch_{epoch}.pth')
             if debug: print('\n\n\n')
-
+            if cf.use_boosting:
+                if (epoch + 1) % 50 == 0:
+                    if boosting_num < 3:
+                        print(f'begin Boosting: {boosting_num + 1}')
+                        with open('data/clsp.trnscr','r') as file:
+                            words = list(set([line.strip() for line in file][1:]))
+                        with torch.no_grad():
+                            for batch_idx, (data,target,input_lengths,output_lengths) in enumerate(test_dataloader):
+                                data = data.to(device)
+                                output = untie_boosted_output(data,model,input_lengths,boosting_num).transpose(0,1)[0]
+                                probabilities = compute_word_probabilities(output,words,loss_function,input_lengths)
+                                if max(probabilities) < 0.3:
+                                    autochoose_pool.append(''.join(chr(i+96) for i in target if i != 0))
+                                max_prob.append(max(probabilities))
+                        autochoose_pool = list(set(autochoose_pool))
+                        print(f'words included: {autochoose_pool}')
+                        print(f'max probs: {max_prob}')
+                        autochoose_dataset = AsrDatasetAutoChoose(autochoose_pool,
+                                                                scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
+                        autochoose_dataloader = DataLoader(autochoose_dataset,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
+                        if 48 - len(autochoose_dataloader) > 10: boosting_num += 1
+                        print(f'included words num: {len(autochoose_pool)}\n end Boosting {boosting_num + 1}')
         plt.plot(train_loss,label='train loss')
         plt.plot(test_loss, label='test loss')
         plt.xlabel('epoch')
@@ -142,7 +190,7 @@ def main(training):
             print('Test Accuracy: {:.2f}%'.format(accuracy * 100))
 
 
-def compute_val_loss(dataloader, model, loss_function):
+def compute_val_loss(dataloader, model, loss_function, boosting_num=0):
     for p in model.parameters():
         p.requires_grad = False
     model.eval()
@@ -151,7 +199,10 @@ def compute_val_loss(dataloader, model, loss_function):
         for batch_idx,(data, target, input_lengths, target_lengths) in enumerate(dataloader):
             data = data.to(device)
             target = target.to(device)
-            output = model(data,input_lengths).transpose(0,1).contiguous()# .requires_grad_()
+            if cf.use_boosting:
+                output = untie_boosted_output(data,model,input_lengths,boosting_num)
+            else:
+                output = model(data,input_lengths).transpose(0,1).contiguous()# .requires_grad_()
             # input_lengths = torch.tensor([int(output.size(0))  for i in range(output.size(1))],dtype=torch.int32)
             loss = loss_function(output,target,input_lengths,target_lengths)
             total_loss += loss.item()
@@ -179,7 +230,7 @@ def beam_search_decode(output,beam_size,input_lengths):
     print(res)
     return res
     
-def compute_word_probabilities(output, target_words, ctc_loss, input_lengths, phonemes_class):
+def compute_word_probabilities(output, target_words, ctc_loss, input_lengths, phonemes_class=None):
     probabilities = []
     for target_word in target_words:
         if not cf.use_phoneme:
@@ -249,33 +300,46 @@ def compute_accuracy(dataloader, model, decode):
     with torch.no_grad():
         for batch_idx,(data,target,input_lengths,output_lengths) in enumerate(dataloader):
             data = data.to(device)
-            output = model(data,input_lengths)[0]
-            probabilities = compute_word_probabilities(output, words, ctc_loss, input_lengths, phonemes_class)
-            # print(torch.argmax(output,dim=-1))
-            
-            if cf.greedy_decode:
-                decoded_output = decode(output,input_lengths,words,phonemes_class)
-            else:
-                decoded_output = beam_search_decode(output,10,input_lengths)
-            if not cf.use_phoneme:
+            if cf.use_boosting:        
+                for boost_cycle in range(3):
+                    output = untie_boosted_output(data,model,input_lengths,boost_cycle).transpose(0,1)[0]
+                    probabilities = compute_word_probabilities(output, words, ctc_loss, input_lengths, phonemes_class)
+                    if max(probabilities) > 0.5:
+                        decoded_output_ = words[np.argmax(probabilities)]
+                        break
+                    else:
+                        boost_cycle += 1
                 target = ''.join([int_to_char(t.item()) for t in target[1:-1]])
-                decoded_output_ = words[np.argmax(probabilities)]
+                if decoded_output_ == target:
+                    correct+=1
+                total+=1
             else:
-                target = ''.join([phonemes_class.int_to_phonemes[t.item()] for t in target[1:-1]])
-                decoded_output_ = ''.join(words[np.argmax(probabilities)])
-            # print(f'target:{target}')
-            # old version when decoded_output is merged to 48 words
-            
-            print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
-            if decoded_output_ == target:
-                correct+=1
-            total+=1
-            # new version when decoded_output is original
-            # for i in range(len(decoded_output)):
-            #     if(i<len(target)):
-            #         if decoded_output[i] == target[i]:
-            #             correct+=1
-            #     total+=1
+                output = model(data,input_lengths)[0]
+                # print(torch.argmax(output,dim=-1))
+                probabilities = compute_word_probabilities(output, words, ctc_loss, input_lengths, phonemes_class)
+                if cf.greedy_decode:
+                    decoded_output = decode(output,input_lengths,words,phonemes_class)
+                else:
+                    decoded_output = beam_search_decode(output,10,input_lengths)
+                if not cf.use_phoneme:
+                    target = ''.join([int_to_char(t.item()) for t in target[1:-1]])
+                    decoded_output_ = words[np.argmax(probabilities)]
+                else:
+                    target = ''.join([phonemes_class.int_to_phonemes[t.item()] for t in target[1:-1]])
+                    # decoded_output_ = ''.join(words[np.argmax(probabilities)])
+                # print(f'target:{target}')
+                # old version when decoded_output is merged to 48 words
+                
+                print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+                if decoded_output_ == target:
+                    correct+=1
+                total+=1
+                # new version when decoded_output is original
+                # for i in range(len(decoded_output)):
+                #     if(i<len(target)):
+                #         if decoded_output[i] == target[i]:
+                #             correct+=1
+                #     total+=1
     return correct / total
 
 if __name__ == "__main__":

@@ -147,13 +147,12 @@ class AsrDataset(Dataset):
                 # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
                 wav, sr = sf.read(os.path.join(wav_dir, wavfile))
                 wav = np.array([0 for _ in range(400)]+wav[np.nonzero(wav)[0]].tolist()+[0 for _ in range(400)])
-                # mfcc_e, mfcc_h = self.hormomorphic_filter(wav)
+                mfcc_e, mfcc_h = self.hormomorphic_filter(wav)
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()
                 delta_mfccs = (librosa.feature.delta(feats))
                 delta2_mfccs = (librosa.feature.delta(feats,order=2))
                 # feats = np.concatenate([feats, delta_mfccs, delta2_mfccs],axis=1)
-                # feats = np.concatenate([feats, mfcc_e, mfcc_h, delta_mfccs, delta2_mfccs],axis=1)
-                feats = np.concatenate([feats, delta_mfccs, delta2_mfccs],axis=1)
+                feats = np.concatenate([feats, mfcc_e, mfcc_h, delta_mfccs, delta2_mfccs],axis=1)
 
                 # feats = scaler.fit_transform(feats)
                 features.append(feats)
@@ -184,3 +183,25 @@ class AsrDataset(Dataset):
 ##################################WARNING: RUNNING ONE TIME IS ENOUGH#############################
 # A = DataExtension()
 # A.process_audio_files(wav_dir='data/waveforms/1a',output_dir='data/data_extend')
+
+class AsrDatasetAutoChoose(AsrDataset):
+    def __init__(self, words_not_to_del, scr_file, feature_file=None, feature_label_file=None, wav_scp='data/clsp.trnwav', wav_dir='data/waveforms', feature_type=cf.feature_type):
+        super().__init__(scr_file, feature_file, feature_label_file, wav_scp, wav_dir, feature_type)
+        self.words_not_to_del = words_not_to_del
+        with open('data/clsp.trnscr','r') as file:
+            self.words_dic = list(set([line.strip() for line in file][1:]))
+        self.words_to_del = [word for word in self.words_dic if word not in self.words_not_to_del]
+        self.filter_dataset()
+    def int_to_word(self,int_list):
+        return ''.join([chr(i+96) for i in int_list if i != 0])
+    def filter_dataset(self):
+        indices_to_remove = []
+        for i, script in enumerate(self.script):
+            word = self.int_to_word(script)
+            if word in self.words_to_del:
+                indices_to_remove.append(i)
+        for index in sorted(indices_to_remove, reverse=True):
+            del self.script[index]
+            del self.features[index]
+    
+
