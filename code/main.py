@@ -171,7 +171,7 @@ def main(training):
                         autochoose_dataset = AsrDatasetAutoChoose(autochoose_pool,
                                                                 scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
                         autochoose_dataloader = DataLoader(autochoose_dataset,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
-                        if 48 - len(autochoose_dataloader) > 10: boosting_num += 1
+                        if 48 - len(autochoose_pool) > 10: boosting_num += 1
                         print(f'included words num: {len(autochoose_pool)}\n end Boosting {boosting_num + 1}')
         plt.plot(train_loss,label='train loss')
         plt.plot(test_loss, label='test loss')

@@ -68,18 +68,13 @@ class AsrDataset(Dataset):
         else:
             # old version when script is not phoneme but word itself
             self.script = [[self.letter_to_int(c) for c in str] for str in self.script ]
-
-            # old version when only using 0 at start and end of array
-            
+            # old version when only using 0 at start and end of array      
             self.script = [[0] + array + [0] for array in self.script]
-
             # new version when add 0 at each interval
             # self.script = [[0] + [item for sublist in [[i,0] for i in array] for item in sublist] for array in self.script]
 
         if feature_type == 'quantized':
-
-            self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]
-            
+            self.features = pd.read_csv(feature_file,header=None).values.tolist()[1:]      
             if cf.use_vectorized_feature:
                 # new version when features is converted by Word2Vec
                 self.features = [[feature for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
@@ -96,9 +91,6 @@ class AsrDataset(Dataset):
         
         self.max_feature_length = np.max([len(a) for a in self.features])
         self.max_scipt_length = np.max([len(a) for a in self.script])
-
-        # tmp = np.array(pd.read_csv('data/clsp.endpts',header=None).values.tolist()[1:]).flatten().tolist()
-        # self.endpoints = [[int(start),int(end)] for start_end_str in tmp for start,end in [start_end_str.split(' ')] ]
     def __len__(self):
         """
         :return: num_of_samples
@@ -111,7 +103,6 @@ class AsrDataset(Dataset):
         :param idx: index of sample
         :return: spelling_of_word, feature
         """
-        
         spelling_of_word = self.script[idx]# older version in one-hot np.eye(26)[np.array(self.script[idx])-1]
         if self.feature_type == 'quantized':
             if cf.use_vectorized_feature:
@@ -126,7 +117,6 @@ class AsrDataset(Dataset):
 
     def letter_to_int(self,char):
         return string.ascii_lowercase.index(char.lower())+1
-
 
     # This function is provided
     def compute_mfcc(self, wav_scp, wav_dir):
