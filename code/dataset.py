@@ -136,6 +136,7 @@ class AsrDataset(Dataset):
                 wavfile_path = os.path.join(wav_dir, wavfile)
                 # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
                 wav, sr = sf.read(os.path.join(wav_dir, wavfile))
+                # wav = wav[np.nonzero(wav)[0]]
                 wav = np.array([0 for _ in range(400)]+wav[np.nonzero(wav)[0]].tolist()+[0 for _ in range(400)])
                 mfcc_e, mfcc_h = self.hormomorphic_filter(wav)
                 feats = librosa.feature.mfcc(y=wav, sr=16e3, n_mfcc=40, hop_length=160, win_length=400).transpose()

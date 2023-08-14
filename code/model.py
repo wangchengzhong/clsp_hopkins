@@ -73,8 +73,12 @@ class LSTM_ASR(torch.nn.Module):
 
             
             self.group = CNN_LSTM_Group(input_size=input_size,hidden_size=hidden_size,num_layers=num_layers,output_size=output_size,feature_type=feature_type)
+            
             if cf.use_boosting:
-                self.groups = [self.group for _ in range(3)]
+                self.group2 = CNN_LSTM_Group(input_size=input_size,hidden_size=hidden_size,num_layers=1,output_size=output_size,feature_type=feature_type)
+                self.group3 = CNN_LSTM_Group(input_size=input_size,hidden_size=hidden_size,num_layers=num_layers,output_size=output_size,feature_type=feature_type)
+                self.groups = [self.group, self.group2, self.group3]
+                # self.groups = [self.group for _ in range(3)]
 
     def forward(self, batch_features, input_lengths):
         if cf.debug: print('\n=============model forward begin')

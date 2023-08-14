@@ -21,3 +21,9 @@ data/split/clsp.trnwav.kept.extend
 ref_model/model_mfcc_hiddensize_512_output_26_batch_10_lr_0.001_vec_1epoch_26.pth
 
 ref_model/model_mfcc_hiddensize_512_output_26_batch_10_lr_0.001_vec_1epoch_430.pth
+
+packages/
+
+ref_model/model_mfcc_hiddensize_101_output_26_batch_8_lr_0.001_vec_1epoch_250.pth
+
+ref_model/model_mfcc_hiddensize_101_output_26_batch_8_lr_0.001_vec_1epoch_400.pth

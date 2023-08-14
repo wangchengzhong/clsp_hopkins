@@ -29,7 +29,7 @@ def get_feature_params(feature_type):
     #          185 90           90  89, 42,93      120/40        # 513# 67 # 93 512 203
 in_seq_length, out_seq_length, feature_size, hidden_size, num_layers = get_feature_params(feature_type)
 
-use_boosting = False
+use_boosting = True
 use_transformer = False
 greedy_decode = True
 
@@ -43,5 +43,5 @@ pretrained_model_path = 'checkpoint/model_epoch1000_lr_0.005.pth'
 
 use_trainset_to_test = False
 test_batch_size = 1
-test_epoch_num = 200  # 430 #228 239 131
+test_epoch_num = 500  # 430 #228 239 131
 test_model_path= f'{folder_path}/model_{feature_type}_hiddensize_{hidden_size}_output_{gOutputSize}_batch_{gBatchSize}_lr_{gLr}_vec_{1 if use_vectorized_feature else 0}.pth'

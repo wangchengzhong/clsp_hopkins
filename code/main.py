@@ -121,6 +121,7 @@ def main(training):
             words = list(set([line.strip() for line in file][1:]))
         autochoose_dataset = AsrDatasetAutoChoose(words,scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
         autochoose_dataloader = DataLoader(autochoose_dataset,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
+        autochoose_testdataloader = test_dataloader
     model = LSTM_ASR(input_size=[cf.in_seq_length,cf.feature_size],output_size=[cf.out_seq_length,cf.gOutputSize],feature_type=cf.feature_type)
 
     # your can simply import ctc_loss from torch.nn
@@ -135,6 +136,9 @@ def main(training):
     autochoose_pool = []
     boosting_num = 0
     max_prob = []
+    with open('data/clsp.trnscr','r') as file:
+        words = list(set([line.strip() for line in file][1:]))
+    past_word_dic = words
     if(training):
         if cf.use_pretrained:
             model.load_state_dict(torch.load(cf.pretrained_model_path))
@@ -152,27 +156,30 @@ def main(training):
                 torch.save(model.state_dict(),cf.model_path.split('.pth')[0]+f'epoch_{epoch}.pth')
             if debug: print('\n\n\n')
             if cf.use_boosting:
-                if (epoch + 1) % 50 == 0:
-                    if boosting_num < 3:
+                if (epoch + 1) % 70 == 0:
+                    if boosting_num < 2:
                         print(f'begin Boosting: {boosting_num + 1}')
-                        with open('data/clsp.trnscr','r') as file:
-                            words = list(set([line.strip() for line in file][1:]))
                         with torch.no_grad():
-                            for batch_idx, (data,target,input_lengths,output_lengths) in enumerate(test_dataloader):
+                            for batch_idx, (data,target,input_lengths,output_lengths) in enumerate(autochoose_testdataloader):
                                 data = data.to(device)
-                                output = untie_boosted_output(data,model,input_lengths,boosting_num).transpose(0,1)[0]
-                                probabilities = compute_word_probabilities(output,words,loss_function,input_lengths)
-                                if max(probabilities) < 0.3:
+                                output = untie_boosted_output(data,model,input_lengths,boosting_num)
+                                probabilities = compute_word_probabilities(output,past_word_dic,loss_function,input_lengths)
+                                if max(probabilities) < 0.6:
                                     autochoose_pool.append(''.join(chr(i+96) for i in target if i != 0))
+                                    autochoose_pool.append(past_word_dic[np.argmax(probabilities)])
                                 max_prob.append(max(probabilities))
                         autochoose_pool = list(set(autochoose_pool))
-                        print(f'words included: {autochoose_pool}')
-                        print(f'max probs: {max_prob}')
-                        autochoose_dataset = AsrDatasetAutoChoose(autochoose_pool,
-                                                                scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
-                        autochoose_dataloader = DataLoader(autochoose_dataset,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
-                        if 48 - len(autochoose_pool) > 10: boosting_num += 1
-                        print(f'included words num: {len(autochoose_pool)}\n end Boosting {boosting_num + 1}')
+                        if (len(past_word_dic) - len(autochoose_pool)) > 7: 
+                            past_word_dic = autochoose_pool
+                            print(f'words included: {autochoose_pool}')
+                            autochoose_dataset = AsrDatasetAutoChoose(autochoose_pool,
+                                                                    scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
+                            autochoose_dataloader = DataLoader(autochoose_dataset,batch_size=int(gBatchSize)-boosting_num-1,shuffle=True,collate_fn=collate_fn)
+                            autochoose_testdataloader = DataLoader(autochoose_dataset,batch_size=1,shuffle=False,collate_fn=collate_fn)
+                            boosting_num += 1
+                            autochoose_pool = []
+                            optimizer = torch.optim.Adam(model.parameters(), lr=cf.gLr/(0.55*(boosting_num+1)))
+                            print(f'included words num: {len(autochoose_pool)}\n end Boosting {boosting_num}')
         plt.plot(train_loss,label='train loss')
         plt.plot(test_loss, label='test loss')
         plt.xlabel('epoch')
@@ -300,16 +307,28 @@ def compute_accuracy(dataloader, model, decode):
     with torch.no_grad():
         for batch_idx,(data,target,input_lengths,output_lengths) in enumerate(dataloader):
             data = data.to(device)
-            if cf.use_boosting:        
+            if cf.use_boosting:     
+                decoded_output_ = 0 
+                cross_group_probabilities = []
                 for boost_cycle in range(3):
-                    output = untie_boosted_output(data,model,input_lengths,boost_cycle).transpose(0,1)[0]
+                    output = untie_boosted_output(data,model,input_lengths,boost_cycle)
                     probabilities = compute_word_probabilities(output, words, ctc_loss, input_lengths, phonemes_class)
-                    if max(probabilities) > 0.5:
-                        decoded_output_ = words[np.argmax(probabilities)]
+                    cross_group_probabilities.append(probabilities)
+                    if max(probabilities) > 0.4: # %$ 0.415:#0.415: # 0.42
+                        probabilities = sorted(probabilities)
+                        if probabilities[0] - probabilities[1] > 0.2: 
+                            decoded_output_ = words[np.argmax(probabilities)]
                         break
                     else:
                         boost_cycle += 1
+                if decoded_output_ == 0:
+                    # result = np.sum(np.array(cross_group_probabilities),axis=0)
+                    decoded_output_ = words[np.argmax(cross_group_probabilities[-1])]
+                        
+                        
                 target = ''.join([int_to_char(t.item()) for t in target[1:-1]])
+                print(f'decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+
                 if decoded_output_ == target:
                     correct+=1
                 total+=1
