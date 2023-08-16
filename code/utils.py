@@ -2,7 +2,7 @@ import os
 import shutil
 from scipy.signal import butter, iirfilter, lfilter
 import soundfile as sf
-
+import re
 #############################DATA EXTENSION#############################
 class DataExtension:
     def __init__(self):
@@ -82,3 +82,34 @@ def extend_clsp_trnscr_kept_file():
                 f.write(line)
             else:
                 f.write(line*38)
+
+def write_test_wav_file():
+    with open('data/clsp.devwav','r') as f:
+        wav_files = f.read().splitlines()[1:]
+    
+    os.makedirs('data/testwav',exist_ok=True)
+    for wav_file in wav_files:
+        source_file = os.path.join('data/waveforms',wav_file)
+        target_file = os.path.join('data/testwav',wav_file)
+        shutil.copy(source_file,target_file)
+
+def extract_words_and_compare(file1, file2, output1, output2):
+    with open(file1,'r') as f1, open(file2,'r') as f2:
+        lines1 = f1.readlines()
+        lines2 = f2.readlines()
+
+    words1 = [re.search(r'decoded_output: (.*),',line).group(1) for line in lines1]
+    words2 = [re.search(r'decoded_output: (.*),',line).group(1) for line in lines2]
+
+    with open(output1,'w') as f1, open(output2,'w') as f2:
+        for word in words1:
+            f1.write(word + '\n')
+        for word in words2:
+            f2.write(word+'\n')
+    same_word_count = sum(w1==w2 for w1, w2 in zip(words1,words2))
+    same_word_ratio = same_word_count / len(words1)
+    
+    return same_word_ratio
+
+# ratio = extract_words_and_compare('unknown_output_quantized.txt','unknown_output_mfcc.txt','unknown_words_quantized.txt','unknown_words_mfcc.txt')
+# print(f'same ratio: {ratio}')

@@ -59,17 +59,19 @@ class AsrDataset(Dataset):
         self.blank = "<blank>"
         self.silence = "{"
         self.phonemes = None
-        self.script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
-        # # new version when using g2p to convert script to phonemes
-        if cf.use_phoneme:
-            self.phoneme_class = Phonemes(scr_file)
-            self.script = self.phoneme_class.words_to_phonemes_int(self.script)
-            self.script = [[0] + array + [0] for array in self.script]
-        else:
-            # old version when script is not phoneme but word itself
-            self.script = [[self.letter_to_int(c) for c in str] for str in self.script ]
-            # old version when only using 0 at start and end of array      
-            self.script = [[0] + array + [0] for array in self.script]
+        if not cf.inference_unknown:
+            self.script = np.array(pd.read_csv(scr_file, header=None).values.tolist()[1:]).flatten().tolist()
+            # # new version when using g2p to convert script to phonemes
+            if cf.use_phoneme:
+                self.phoneme_class = Phonemes(scr_file)
+                self.script = self.phoneme_class.words_to_phonemes_int(self.script)
+                self.script = [[0] + array + [0] for array in self.script]
+            else:
+                # old version when script is not phoneme but word itself
+                self.script = [[self.letter_to_int(c) for c in str] for str in self.script ]
+                # old version when only using 0 at start and end of array      
+                self.script = [[0] + array + [0] for array in self.script]
+
             # new version when add 0 at each interval
             # self.script = [[0] + [item for sublist in [[i,0] for i in array] for item in sublist] for array in self.script]
 
@@ -88,9 +90,10 @@ class AsrDataset(Dataset):
                 self.features = [[feature_to_index[feature] for feature in feature_list[0].split(' ')if feature] for feature_list in self.features]
         else:
             self.features = self.compute_mfcc(wav_scp = wav_scp, wav_dir = wav_dir)
-        
-        self.max_feature_length = np.max([len(a) for a in self.features])
-        self.max_scipt_length = np.max([len(a) for a in self.script])
+        if cf.inference_unknown:
+            self.script = [[0] for _ in range(len(self.features))]
+        # self.max_feature_length = np.max([len(a) for a in self.features])
+        # self.max_scipt_length = np.max([len(a) for a in self.script])
     def __len__(self):
         """
         :return: num_of_samples
@@ -131,7 +134,7 @@ class AsrDataset(Dataset):
         with open(wav_scp, 'r') as f:
             for wavfile in f:
                 wavfile = wavfile.strip()
-                if wavfile == 'jhucsp.trnwav' or wavfile == 'clsp.trnwav' or wavfile == 'clsp.trnwav.extend':  # skip header
+                if wavfile == 'jhucsp.trnwav' or wavfile == 'clsp.trnwav' or wavfile == 'clsp.trnwav.extend' or wavfile == 'jhucsp.devwav':  # skip header
                     continue
                 wavfile_path = os.path.join(wav_dir, wavfile)
                 # assert(os.path.isfile(wavfile_path),f"文件{wavfile_path}不存在")
@@ -167,7 +170,7 @@ class AsrDataset(Dataset):
         return mfcc_e, mfcc_h
 
 ###########################test module###############################
-# training_set = AsrDataset(scr_file='data/clsp.trnscr',feature_file='data/clsp.trnlbls',feature_label_file='data/clsp.lblnames',wav_scp='data/clsp.trnwav',wav_dir='data/waveforms')
+# training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept',feature_file='data/split/clsp.trnlbls.kept',feature_label_file='data/clsp.lblnames',wav_scp='data/clsp.trnwav',wav_dir='data/waveforms')
 # print(np.max([len(a) for a in training_set.features]))
 
 

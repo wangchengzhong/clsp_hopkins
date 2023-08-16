@@ -1,3 +1,63 @@
+注：测试模型时，请使config.py中use_vectorized_feature, feature_type, test_epoch_num与测试模型的命名匹配！
+   《否则没有输出》
+
+注：测试quantized时，请将use_boosting设为False再更改其他参数，否则报错
+
+注：测试mfcc时，请将use_vectorized_feature设为True再更改其他参数
+
+注：mfcc的基线系统尚不在该代码库内，该代码库仅含提升后的系统
+基线MFCC系统存在于历史版本：
+https://github.com/wangchengzhong/clsp_hopkins/tree/1bd9335c51ecf7c145510e30b38b8c73b9ed31dc
+
+注：use_phoneme请始终设为False，因为不收敛
+
+运行命令只有一个：python code/main.py
+
+运行方法:
+所有控制在config.py中.除了MFCC的基线系统以外,其他改进系统均仅仅更改config.py即可进行.
+注: 请勿更改模型文件的相对位置.若从网络下载参考模型首次测试时,请:
+在母文件夹(注意不是code文件夹)新建两个文件夹,名为:
+checkpoint/quantized_output_26_hs_103
+checkpoint/mfcc_output_26_hs_101
+先按照模型的hidden size,将ref_model中的模型按照其类别移动到这两个文件夹下,而后进行测试
+
+运行测试/训练/推理位置数据:
+更改config.py中的以下几句:
+
+train_mode = False 想自己训练模型,请使用True;想使用预训练的模型,请使用False;推理未知数据时,请设为False
+
+use_vectorized_feature = True(仅在离散标签输入时有效,请在运行mfcc时将它设为True).False时对应离散标签基线系统,True时对应离散标签词向量提升系统
+注意,mfcc本身就是提升后的系统,由于版本控制原因,基线系统请在历史commit中查找(强烈建议不用基线系统)
+
+feature_type = "mfcc"/"quantized":选择输入形式.mfcc是mfcc输入,quantized是离散标签输入
+use_boosting =  False(建议设为False,这种方法的稳健性并不好;可以设为True体验)
+inference_unknown = False(当推理未知数据时,请将它改为True.未知数据已经放好了,改为True可以直接运行)
+
+test_epoch_num = 200 (在运行模型时,务必与想测试的模型文件名里的epoch一致)
+
+use_phoneme:不能开.若体验不收敛的感觉,可以开了训练试一试
+
+此外,可以单独运行utils.py(DataExtension类需要手动调用),实现数据增广功能.不推荐使用.
+
+
+在linux命令行,运行python code/main.py 即可自动训练/测试已知数据精度/推理未知数据
+
+python3.6、3.9 Linux/Windows系统已经过测试
+
+注：由于版本不同，ctcloss运行时偶尔会出现load到cpu和gpu不确定的情况。这时，测试时请修改device为cpu，训练时可以根据报错寻找相应的device更改
+
+其他用到的超参数,请酌情更改试验
+
+
+
+
+
+________________________________介绍________________________
+
+
+
+
+
 该项目的目标是为 48 个单词的词汇构建一个孤立单词语音识别器。您将构建两个基于（循环）神经网络的识别器，一个使用基于量化语音的表示，另一个使用连续值梅尔频率倒谱系数 (MFCC)。
 
 每个语音样本（即 *.wav 文件）都经过处理，每 10 毫秒提取一次频谱特征，并且生成的特征向量均已量化为 256 个离散标签之一。这些将构成您的离散值观察序列 Y。

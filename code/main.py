@@ -7,7 +7,7 @@ from dataset import AsrDataset,Phonemes,AsrDatasetAutoChoose
 from model import LSTM_ASR
 import numpy as np
 from sklearn.model_selection import train_test_split
-from test_script.crnn.models.crnn import CRNN
+# from test_script.crnn.models.crnn import CRNN
 from ctc_decoder import beam_search
 from config import debug,device,gBatchSize,test_debug,in_seq_length
 import config as cf
@@ -104,18 +104,20 @@ def main(training):
     if cf.feature_type == "quantized":
         training_set = AsrDataset('data/split/clsp.trnscr.kept','data/split/clsp.trnlbls.kept','data/clsp.lblnames')
         train_dataset, val_dataset = train_test_split(training_set,test_size=0.2)
-        # training_set = AsrDataset('data/clsp.trnscr','data/clsp.trnlbls','data/clsp.lblnames')
-        test_set = AsrDataset('data/split/clsp.trnscr.held','data/split/clsp.trnlbls.held','data/clsp.lblnames')
+        if cf.inference_unknown:
+            test_set = AsrDataset('',feature_file='data/clsp.devlbls',feature_label_file='data/clsp.lblnames')
+        else:
+            test_set = AsrDataset('data/split/clsp.trnscr.held','data/split/clsp.trnlbls.held','data/clsp.lblnames')
     else:
         training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept',wav_scp='data/split/clsp.trnwav.kept',wav_dir='data/waveforms')
-        # training_set = AsrDataset(scr_file='data/split/clsp.trnscr.kept.extend',wav_scp='data/split/clsp.trnwav.kept.extend',wav_dir='data/data_extend')
-        test_set = AsrDataset(scr_file='data/split/clsp.trnscr.held',wav_scp='data/split/clsp.trnwav.held',wav_dir='data/waveforms')
+        if cf.inference_unknown:
+            test_set = AsrDataset(scr_file='',wav_scp='data/clsp.devwav',wav_dir='data/waveforms')
+        else:
+            test_set = AsrDataset(scr_file='data/split/clsp.trnscr.held',wav_scp='data/split/clsp.trnwav.held',wav_dir='data/waveforms')
+
     train_dataloader = DataLoader(training_set,batch_size=gBatchSize,shuffle=True,collate_fn=collate_fn)
     val_dataloader = DataLoader(test_set, batch_size=gBatchSize,shuffle=False,collate_fn=collate_fn)
-    if cf.use_trainset_to_test:
-        test_dataloader = DataLoader(training_set,batch_size=cf.test_batch_size,shuffle=False,collate_fn=collate_fn)
-    else:
-        test_dataloader = DataLoader(test_set,batch_size=cf.test_batch_size,shuffle=False,collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_set,batch_size=cf.test_batch_size,shuffle=False,collate_fn=collate_fn)
     if cf.use_boosting:
         with open('data/clsp.trnscr','r') as file:
             words = list(set([line.strip() for line in file][1:]))
@@ -156,7 +158,7 @@ def main(training):
                 torch.save(model.state_dict(),cf.model_path.split('.pth')[0]+f'epoch_{epoch}.pth')
             if debug: print('\n\n\n')
             if cf.use_boosting:
-                if (epoch + 1) % 70 == 0:
+                if (epoch + 1) % 100 == 0:
                     if boosting_num < 2:
                         print(f'begin Boosting: {boosting_num + 1}')
                         with torch.no_grad():
@@ -165,6 +167,8 @@ def main(training):
                                 output = untie_boosted_output(data,model,input_lengths,boosting_num)
                                 probabilities = compute_word_probabilities(output,past_word_dic,loss_function,input_lengths)
                                 if max(probabilities) < 0.6:
+                                    # probabilities1 = sorted(probabilities)
+                                    # if (probabilities1[-1] - probabilities1[-2]) < 0.1:
                                     autochoose_pool.append(''.join(chr(i+96) for i in target if i != 0))
                                     autochoose_pool.append(past_word_dic[np.argmax(probabilities)])
                                 max_prob.append(max(probabilities))
@@ -315,19 +319,24 @@ def compute_accuracy(dataloader, model, decode):
                     probabilities = compute_word_probabilities(output, words, ctc_loss, input_lengths, phonemes_class)
                     cross_group_probabilities.append(probabilities)
                     if max(probabilities) > 0.4: # %$ 0.415:#0.415: # 0.42
-                        probabilities = sorted(probabilities)
-                        if probabilities[0] - probabilities[1] > 0.2: 
-                            decoded_output_ = words[np.argmax(probabilities)]
+                        probabilities1 = sorted(probabilities)
+                        # if probabilities1[-1] - probabilities1[-2] > 0.1: # 0.2
+                        # result = np.sum(np.array(cross_group_probabilities[:boost_cycle+1]),axis=0)
+                        decoded_output_ = words[np.argmax(probabilities)]
                         break
                     else:
                         boost_cycle += 1
                 if decoded_output_ == 0:
                     # result = np.sum(np.array(cross_group_probabilities),axis=0)
                     decoded_output_ = words[np.argmax(cross_group_probabilities[-1])]
+
                         
                         
                 target = ''.join([int_to_char(t.item()) for t in target[1:-1]])
-                print(f'decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+                if not cf.inference_unknown:
+                    print(f'decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+                else:
+                    print(f'decoded_output: {decoded_output_}, probability: {np.max(probabilities)}')
 
                 if decoded_output_ == target:
                     correct+=1
@@ -348,8 +357,10 @@ def compute_accuracy(dataloader, model, decode):
                     # decoded_output_ = ''.join(words[np.argmax(probabilities)])
                 # print(f'target:{target}')
                 # old version when decoded_output is merged to 48 words
-                
-                print(f'decoded_output:{decoded_output}, max decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
+                if cf.inference_unknown:
+                    print(f'decoded_output: {decoded_output_}, probability: {np.max(probabilities)}')
+                else:
+                    print(f'greedy decoded_output:{decoded_output}, ctc decoded_output: {decoded_output_}, target:{target}, probability: {np.max(probabilities)}')
                 if decoded_output_ == target:
                     correct+=1
                 total+=1
